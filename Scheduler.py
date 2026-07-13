@@ -17,7 +17,9 @@ import pandas as pd
 from fuzzywuzzy import process
 import math
 import string
-
+from datetime import datetime, timedelta
+from openpyxl import Workbook
+from openpyxl.styles import Font, Border, Side, Alignment
 
 # // =======================================================
 # // Global Variables - declare constant variables
@@ -32,7 +34,6 @@ COL_JOB_TYPE = "Job Type"
 COL_ALLOY = "Alloy"
 COL_CAST_TYPE = "Casting Type"
 # change as needed
-max_molds_per_day = 6
 
 max_l_molds_per_day = 30
 max_f_molds_per_day = 3
@@ -49,8 +50,28 @@ filtered_job_counts = {
     "added":0,
 }
 
+schedule_days = {
+    1: {"L": 0, "F": 0},
+    2: {"L": 0, "F": 0}
+}
+
+EXPORT_COLUMNS = {
+    COL_DUE_DATE: "Due Date",
+    "Customer Name": "Customer Name",
+    "Part Number": "Part Number",
+    COL_JOB_NUMBER: "Job Number",
+    "EXT": "EXT",
+    COL_ALLOY: "Alloy",
+    COL_CAST_TYPE: "Mold Type",
+    "Quantity of Molds": "Quantity of Molds",
+    "Castings Per Mold": "Castings Per Mold",
+    "Quantity of Cores": "Cores Per Mold",
+    "Total Weight per EXT": "Total Weight per EXT",
+    "Molds for EXT": "# of Molds for EXT"
+}
+
 # // =======================================================
-# // Functions - Placeholder for refactoring into functions and classes
+# // Functions
 # // =======================================================
 
 def Read_File(filepath = "C:\\Users\\lburkardt\\OneDrive - MonettMetalsUS1\\Quality\\Schedule\\Open Order Report.xlsx"):
@@ -66,9 +87,6 @@ def Read_File(filepath = "C:\\Users\\lburkardt\\OneDrive - MonettMetalsUS1\\Qual
 
     return(ImportedFile)
 
-# // =======================================================
-# // Scheduling Module - Prep and Mold
-# // =======================================================
 
 def Mold_Scheduler(ReadyToMold):
     # Molds needed column
@@ -87,11 +105,7 @@ def Mold_Scheduler(ReadyToMold):
             filtered_job_counts["hold"] += 1
             continue
         
-        if str(job[COL_JOB_TYPE]) == "IFA":
-            filtered_job_counts["job_type"] += 1
-            continue
-
-        if str(job[COL_JOB_TYPE]) == "IFC":
+        if str(job[COL_JOB_TYPE]).upper() in ["IFA", "IFC"]:
             filtered_job_counts["job_type"] += 1
             continue
 
@@ -222,12 +236,515 @@ def Get_daily_mold_limit(job):
     if pour_weight > 300:
         return 3
     
-    casting_type = str(job["Casting Type"]).upper()
+    casting_type = str(job[COL_CAST_TYPE]).upper()
 
     if casting_type == "F":
         return 3
     
     return 6
+
+
+def Is_F_Job(job):
+
+    if job[COL_POUR_WEIGHT] > 300:
+        return True
+
+    return str(job[COL_CAST_TYPE]).upper() == "F"
+
+
+def Assign_days(schedule_df):
+
+    schedule_df["Schedule Day"] = None
+
+    day_usage = {}
+
+    for index, row in schedule_df.iterrows():
+
+        molds = row["Molds for EXT"]
+
+        bucket = "F" if Is_F_Job(row) else "L"
+
+        day = 1
+
+        while True:
+
+            if day not in day_usage:
+                day_usage[day] = {
+                    "L": 0,
+                    "F": 0
+                }
+
+            capacity = (
+                max_f_molds_per_day
+                if bucket == "F"
+                else max_l_molds_per_day
+            )
+
+            if day_usage[day][bucket] + molds <= capacity:
+
+                day_usage[day][bucket] += molds
+
+                schedule_df.at[index, "Schedule Day"] = day
+
+                break
+
+            day += 1
+
+    print(day_usage)
+
+    return schedule_df
+
+
+def print_bucket(Schedule_Data_Frame):
+
+    for day in sorted(
+        Schedule_Data_Frame["Schedule Day"].unique()
+    ):
+
+        day_rows = Schedule_Data_Frame[
+            Schedule_Data_Frame["Schedule Day"] == day
+        ]
+
+        l_molds = day_rows[
+            ~day_rows.apply(Is_F_Job, axis=1)
+        ]["Molds for EXT"].sum()
+
+        f_molds = day_rows[
+            day_rows.apply(Is_F_Job, axis=1)
+        ]["Molds for EXT"].sum()
+
+        print(
+            f"Day {day}: "
+            f"L={l_molds}/{max_l_molds_per_day}, "
+            f"F={f_molds}/{max_f_molds_per_day}"
+        )
+
+def Build_Daily_Schedules(Schedule_Data_Frame):
+
+    daily_schedules = {}
+
+    for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):
+        daily_schedules[day] = (
+            Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
+            .copy()
+            .sort_values(
+                by=[COL_ALLOY,COL_JOB_NUMBER]
+            )
+        )
+    return daily_schedules
+
+def Build_Daily_Export_Blocks(
+    Daily_Schedules,
+    Day_Dates
+):
+
+    export_blocks = {}
+
+    for day, df in Daily_Schedules.items():
+
+        weight_total = (
+            df["Total Weight per EXT"]
+            .fillna(0)
+            .sum()
+        )
+
+        mold_total = (
+            df["Molds for EXT"]
+            .fillna(0)
+            .sum()
+        )
+
+        export_blocks[day] = {
+
+            "date": Day_Dates[day]["date"],
+            "weekday": Day_Dates[day]["weekday"],
+
+            "rows": df[
+                [
+                    COL_DUE_DATE,
+                    "Customer Name",
+                    "Part Number",
+                    COL_JOB_NUMBER,
+                    "EXT",
+                    COL_ALLOY,
+                    COL_CAST_TYPE,
+                    "Quantity of Molds",
+                    "Castings Per Mold",
+                    "Quantity of Cores",
+                    "Total Weight per EXT",
+                    "Molds for EXT"
+                ]
+            ].copy(),
+
+            "weight_total": weight_total,
+            "mold_total": mold_total
+        }
+
+    return export_blocks
+
+def Build_Schedule_Dates(
+    daily_schedules,
+    start_date
+):
+
+    day_dates = {}
+
+    current_date = start_date
+
+    for day in sorted(daily_schedules.keys()):
+
+        while current_date.weekday() > 4:
+            current_date += timedelta(days=1)
+
+        day_dates[day] = {
+            "date": current_date,
+            "weekday": current_date.strftime("%A")
+        }
+
+        current_date += timedelta(days=1)
+
+    return day_dates
+
+def Print_Export_Blocks(export_blocks):
+
+    for day in export_blocks:
+
+        print("\n" + "=" * 50)
+
+        print(
+            f"Mold Schedule    "
+            f"{export_blocks[day]['date'].strftime('%m/%d/%Y')}    "
+            f"{export_blocks[day]['weekday']}"
+        )
+
+        print("=" * 50)
+
+        print(
+            export_blocks[day]["rows"]
+        )
+
+        print(
+            f"\nTOTAL WEIGHT: "
+            f"{export_blocks[day]['weight_total']}"
+        )
+
+        print(
+            f"TOTAL MOLDS: "
+            f"{export_blocks[day]['mold_total']}"
+        )
+
+def Build_Excel_Rows(export_blocks):
+
+    excel_rows = []
+
+    for day in sorted(export_blocks.keys()):
+
+        block = export_blocks[day]
+
+        excel_rows.append([
+            "Mold Schedule",
+            block["date"].strftime("%m/%d/%Y"),
+            block["weekday"]
+        ])
+
+        excel_rows.append([
+            "Due Date",
+            "Customer Name",
+            "Part Number",
+            "Job Number",
+            "EXT",
+            "Alloy",
+            "Mold Type",
+            "Quantity of Molds",
+            "Castings Per Mold",
+            "Cores Per Mold",
+            "Total Weight per EXT",
+            "# of Molds for EXT"
+        ])
+
+        for _, row in block["rows"].iterrows():
+
+            excel_rows.append([
+                row.get(COL_DUE_DATE, ""),
+                row.get("Customer Name", ""),
+                row.get("Part Number", ""),
+                row.get(COL_JOB_NUMBER, ""),
+                row.get("EXT", ""),
+                row.get(COL_ALLOY, ""),
+                row.get(COL_CAST_TYPE, ""),
+                row.get("Quantity of Molds", ""),
+                row.get("Castings Per Mold", ""),
+                row.get("Quantity of Cores", ""),
+                row.get("Total Weight per EXT", ""),
+                row.get("Molds for EXT", "")
+            ])
+
+        excel_rows.append([
+            "TOTALS",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            block["weight_total"],
+            block["mold_total"]
+        ])
+
+        excel_rows.append([])
+
+    return excel_rows
+
+def Export_Mold_Schedule(
+    Export_Blocks,
+    output_file="Mold Schedule.xlsx"
+):
+
+    wb = Workbook()
+
+    ws = wb.active
+
+    ws.title = "Mold Schedule"
+
+    current_row = 1
+
+    thin = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+
+    bold = Font(bold=True)
+
+    for day in sorted(Export_Blocks.keys()):
+
+        block = Export_Blocks[day]
+
+        # =====================================
+        # Title Row
+        # =====================================
+
+        ws.cell(
+            current_row,
+            1,
+            "Mold Schedule"
+        )
+
+        ws.cell(
+            current_row,
+            2,
+            block["date"].strftime("%m/%d/%Y")
+        )
+
+        ws.cell(
+            current_row,
+            4,
+            block["weekday"]
+        )
+
+        for col in range(1, 13):
+            ws.cell(current_row, col).font = bold
+
+        current_row += 2
+
+        # =====================================
+        # Headers
+        # =====================================
+
+        headers = [
+            "Due Date",
+            "Customer Name",
+            "Part Number",
+            "Job Number",
+            "EXT",
+            "Alloy",
+            "Mold Type",
+            "Quantity of Molds",
+            "Castings Per Mold",
+            "Cores Per Mold",
+            "Total Weight per EXT",
+            "# of Molds for EXT"
+        ]
+
+        for col_num, header in enumerate(
+            headers,
+            start=1
+        ):
+            cell = ws.cell(
+                current_row,
+                col_num,
+                header
+            )
+
+            cell.font = bold
+            cell.border = thin
+
+        current_row += 1
+
+        # =====================================
+        # Data Rows
+        # =====================================
+
+        for _, row in block["rows"].iterrows():
+
+            values = [
+                row.get(COL_DUE_DATE, ""),
+                row.get("Customer Name", ""),
+                row.get("Part Number", ""),
+                row.get(COL_JOB_NUMBER, ""),
+                row.get("EXT", ""),
+                row.get(COL_ALLOY, ""),
+                row.get(COL_CAST_TYPE, ""),
+                row.get("Quantity of Molds", ""),
+                row.get("Castings Per Mold", ""),
+                row.get("Quantity of Cores", ""),
+                row.get("Total Weight per EXT", ""),
+                row.get("Molds for EXT", "")
+            ]
+
+            for col_num, value in enumerate(
+                values,
+                start=1
+            ):
+                cell = ws.cell(
+                    current_row,
+                    col_num,
+                    value
+                )
+
+                cell.border = thin
+
+            current_row += 1
+
+        # =====================================
+        # Totals
+        # =====================================
+
+        ws.cell(
+            current_row,
+            1,
+            "TOTALS"
+        )
+
+        ws.cell(
+            current_row,
+            11,
+            block["weight_total"]
+        )
+
+        ws.cell(
+            current_row,
+            12,
+            block["mold_total"]
+        )
+
+        ws.cell(current_row, 1).font = bold
+        ws.cell(current_row, 11).font = bold
+        ws.cell(current_row, 12).font = bold
+
+        current_row += 3
+
+    # =====================================
+    # Widths
+    # =====================================
+
+    widths = {
+        "A": 12,
+        "B": 30,
+        "C": 25,
+        "D": 15,
+        "E": 6,
+        "F": 15,
+        "G": 12,
+        "H": 15,
+        "I": 15,
+        "J": 15,
+        "K": 18,
+        "L": 15
+    }
+
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    wb.save(output_file)
+
+    print(f"Saved: {output_file}")
+
+# // =======================================================
+# // Scheduling Module - Prep and Mold
+# // =======================================================
+
+def Schedule_Molds():
+    InputFile = Read_File()
+
+    Jobs_to_schedule = Mold_Scheduler(InputFile)
+
+    Schedule_rows = Build_Schedule_Rows(Jobs_to_schedule)
+
+    # print(filtered_job_counts)
+
+    Schedule_Data_Frame = pd.DataFrame(Schedule_rows)
+
+    # CRITICAL FIX
+    Schedule_Data_Frame = (
+        Schedule_Data_Frame
+        .sort_values(
+            by=[COL_ALLOY, COL_DUE_DATE, COL_JOB_NUMBER],
+            ascending=[False, False, False]
+        )
+        .reset_index(drop=True)
+    )
+
+    Schedule_Data_Frame = Assign_days(Schedule_Data_Frame)
+
+    print("\nDay Totals")
+
+    print(
+        Schedule_Data_Frame.groupby("Schedule Day")
+        ["Molds for EXT"]
+        .sum()
+    )
+
+    print(
+        Schedule_Data_Frame[
+            [
+                COL_JOB_NUMBER,
+                "EXT",
+                COL_ALLOY,
+                "Molds for EXT",
+                "Schedule Day"
+            ]
+        ]
+    )
+
+    print_bucket(Schedule_Data_Frame)
+
+    Daily_Schedules = Build_Daily_Schedules(
+        Schedule_Data_Frame
+    )
+
+    Day_Dates = Build_Schedule_Dates(
+        Daily_Schedules,
+        datetime.today() + timedelta(days=1)
+    )
+
+    Export_Blocks = Build_Daily_Export_Blocks(
+        Daily_Schedules,
+        Day_Dates
+    )
+
+    Print_Export_Blocks(
+        Export_Blocks
+    )
+
+    return Export_Blocks
+
+
+
 
 
 # // =======================================================
@@ -259,23 +776,18 @@ def Get_daily_mold_limit(job):
 # =======================================================
 # Main Program Entry
 # =======================================================
+# =======================================================
+# Main Program Entry
+# =======================================================
 
-InputFile = Read_File()
+Export_Blocks = Schedule_Molds()
 
-Jobs_to_schedule = Mold_Scheduler(InputFile)
-
-Schedule_rows = Build_Schedule_Rows(Jobs_to_schedule)
-
-print(filtered_job_counts)
-
-Schedule_Data_Frame = pd.DataFrame(Schedule_rows)
-
-Schedule_Data_Frame = Schedule_Data_Frame.sort_values(
-    by = [COL_ALLOY, COL_DUE_DATE, COL_JOB_NUMBER],
-    ascending = [False,False, False]
+output_file = (
+    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
+    r"\Quality\Schedule\Output\Mold Schedule.xlsx"
 )
 
-print(Schedule_Data_Frame)
-
-
-print("Press enter to exit...")
+Export_Mold_Schedule(
+    Export_Blocks,
+    output_file
+)
