@@ -1,25 +1,39 @@
+# =======================================================
+# Program Status
+# Last Updated: 07-13-2026 12:41 PM
+# Author: Logan Burkardt
+#
+# Current Functionality:
+# - Reads Open Order Report (OOR)
+# - Identifies jobs ready for molding
+# - Excludes:
+#     * On Hold jobs
+#     * Already Scheduled jobs
+#     * Jobs with 0 molds needed
+#     * Investment castings (IFA, IFC, I)
+#
+# Planned Development:
+# - Push mold schedule into daily production schedule
+# - Build Melt WIP schedule
+# - Build Casting/Cleaning WIP schedule
+# - Automate database exports
+# - Consolidate file repositories into a single location
+# =======================================================
 
-# program status - updated 7-13-2026, 12:41pm - Logan Burkardt
-# reads from OOR report
-# successfully identifies which jobs are ready to mold, excluding Holds, Scheduled, and Molds needed = 0.
-# need to push list of jobs into daily schedule next
-# then build Mold WIP for Melt schedule
-# then build Casting WIP for clean schedule
-# then work to automated the database export and clean up file repos to one location
+# =======================================================
+# Imports
+# =======================================================
 
-# // =======================================================
-# // Imports
-# // =======================================================
-
-import pandas as pd
-
-# may not need fuzzywuzzy as data export *should* be consistent. 
-from fuzzywuzzy import process
 import math
 import string
 from datetime import datetime, timedelta
+
+import pandas as pd
+from fuzzywuzzy import process  # May be removed if source data remains consistent
+
 from openpyxl import Workbook
-from openpyxl.styles import Font, Border, Side, Alignment
+from openpyxl.styles import Font, Border, Side
+
 
 # // =======================================================
 # // Global Variables - declare constant variables
@@ -172,8 +186,7 @@ def Expand_Job(job):
     daily_limit = Get_daily_mold_limit(job)
 
     # find which is lesser, molds needed or max molds
-    for ext in extensions:
-
+    for seq, ext in enumerate(extensions):
 
         molds_for_ext = min(
             daily_limit, molds_remaining
@@ -182,7 +195,9 @@ def Expand_Job(job):
         row = job.copy()
 
         row["EXT"] = ext
+        row["Extension_Seq"] = seq
         row["Molds for EXT"] = molds_for_ext
+
     
         row["Total Weight per EXT"] = (
             molds_for_ext *
@@ -258,33 +273,56 @@ def Assign_days(schedule_df):
 
     day_usage = {}
 
+    job_last_day = {}
+
+    part_usage = {}
+
+
     for index, row in schedule_df.iterrows():
 
         molds = row["Molds for EXT"]
 
         bucket = "F" if Is_F_Job(row) else "L"
 
-        day = 1
+        job_num = row[COL_JOB_NUMBER]
+
+        part_num = row["Part Number"]
+
+        day = job_last_day.get(job_num, 0) + 1
 
         while True:
-
+            
             if day not in day_usage:
                 day_usage[day] = {
                     "L": 0,
                     "F": 0
                 }
 
+            if day not in part_usage:
+                part_usage[day] = {}
+
+            if part_num not in part_usage[day]:
+                part_usage[day][part_num] = 0
+            
             capacity = (
                 max_f_molds_per_day
                 if bucket == "F"
                 else max_l_molds_per_day
             )
 
-            if day_usage[day][bucket] + molds <= capacity:
+            if (
+                day_usage[day][bucket] + molds <= capacity
+                and
+                part_usage[day][part_num] + molds <= 6
+                ):
 
                 day_usage[day][bucket] += molds
 
+                part_usage[day][part_num] += molds
+
                 schedule_df.at[index, "Schedule Day"] = day
+
+                job_last_day[job_num] = day
 
                 break
 
@@ -689,14 +727,23 @@ def Schedule_Molds():
 
     Schedule_Data_Frame = pd.DataFrame(Schedule_rows)
 
-    # CRITICAL FIX
     Schedule_Data_Frame = (
-        Schedule_Data_Frame
-        .sort_values(
-            by=[COL_ALLOY, COL_DUE_DATE, COL_JOB_NUMBER],
-            ascending=[False, False, False]
-        )
-        .reset_index(drop=True)
+    Schedule_Data_Frame
+    .sort_values(
+        by=[
+            COL_ALLOY,
+            COL_DUE_DATE,
+            COL_JOB_NUMBER,
+            "Extension_Seq"
+        ],
+        ascending=[
+            False,
+            False,
+            False,
+            True
+        ]
+    )
+    .reset_index(drop=True)
     )
 
     Schedule_Data_Frame = Assign_days(Schedule_Data_Frame)
@@ -773,9 +820,6 @@ def Schedule_Molds():
 
 # If heat number assigned, but not shipped, show on cleaning schedule sorted by due date.
 
-# =======================================================
-# Main Program Entry
-# =======================================================
 # =======================================================
 # Main Program Entry
 # =======================================================
