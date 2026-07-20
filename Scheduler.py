@@ -4,7 +4,7 @@
 # Author: Logan Burkardt
 #
 # Current Functionality:
-# - Reads Open Order Report (OOR)
+# - Reads Open Order Report (OOR).xlsx
 # - Identifies jobs ready for molding
 # - Excludes:
 #     * On Hold jobs
@@ -19,6 +19,29 @@
 # - Automate database exports
 # - Consolidate file repositories into a single location
 # =======================================================
+
+
+# =======================================================
+# Description:
+# This script reads the Open Order Report (OOR), filters jobs ready for molding,
+# and builds a mold schedule while considering daily mold limits.
+# It also provides functions to expand jobs into multiple extensions,
+# assign schedule days, and print the schedule by bucket.
+# =======================================================
+
+
+# =======================================================
+# Need to Refactor
+# scheduler/
+# │
+# ├── Scheduler.py          # Main entry point only
+# ├── config.py             # Constants and settings
+# ├── schedule_logic.py     # Filtering, splitting, day assignment
+# ├── schedule_builder.py   # Daily schedule creation
+# ├── exports.py            # Excel export functions
+# ├── io_utils.py           # File reading
+# └── models.py             # Optional later
+
 
 # =======================================================
 # Imports
@@ -49,6 +72,7 @@ COL_ALLOY = "Alloy"
 COL_CAST_TYPE = "Casting Type"
 # change as needed
 
+# Daily Molds limits, change as needed.
 max_l_molds_per_day = 30
 max_f_molds_per_day = 3
 
@@ -104,6 +128,21 @@ def Read_File(filepath = "C:\\Users\\lburkardt\\OneDrive - MonettMetalsUS1\\Qual
 
 def Mold_Scheduler(ReadyToMold):
     # Molds needed column
+    # =====================================================================
+    # Filters the Open Order Report down to jobs that are eligible
+    # for mold scheduling.
+    #
+    # Removes:
+    #     - Blank rows
+    #     - On Hold jobs
+    #     - Already scheduled jobs
+    #     - Investment casting jobs
+    #     - Jobs requiring no molds
+    # 
+    # Returns:
+    #     List of schedulable job rows.
+    #
+    # =====================================================================
 
     jobs_to_schedule = []
 
@@ -119,18 +158,22 @@ def Mold_Scheduler(ReadyToMold):
             filtered_job_counts["hold"] += 1
             continue
         
+        # Filters out investments jobs based on job type
         if str(job[COL_JOB_TYPE]).upper() in ["IFA", "IFC"]:
             filtered_job_counts["job_type"] += 1
             continue
-
+        
+        # filters out jobs that are already scheduled
         if str(job[COL_SCHEDULED]).upper() == "YES":
             filtered_job_counts["scheduled"] += 1
             continue
 
+        # filters out investment casting jobs based on cast type
         if str(job[COL_CAST_TYPE]).upper() == "I":
             filtered_job_counts["cast_type"] += 1
             continue
             
+        # filters out jobs that require no molds
         if job[COL_MOLDS_NEEDED] <= 0:
             filtered_job_counts["no_molds"] += 1
             continue
@@ -142,7 +185,7 @@ def Mold_Scheduler(ReadyToMold):
 
     return jobs_to_schedule
         
-# function to assign extension letter based on 
+# function to assign extension letter based on the number of splits required for a job  
 def get_extensions(num_splits):
     if num_splits == 1:
          return ["L"]
@@ -150,11 +193,15 @@ def get_extensions(num_splits):
     # create list to assign extensions for that specific job - will need called for each row?
     extensions = []
 
+    # if only one split is needed, return "L" as the extension
+    # NEED TO UPDATE, ONLY ADD EXTENSIONS AS REQUIRED, IE: IF JOB IS NOT SPLIT, NO EXTENSIONS ARE ADDED INCLUDING "L"
     alphabet = list(string.ascii_uppercase)
 
+    # Assign extensions for each split of the job
     for i in range(num_splits - 1):
         extensions.append(alphabet[i])
 
+    # Append "L" as the last extension for the job
     extensions.append("L")
 
     return extensions
@@ -162,6 +209,7 @@ def get_extensions(num_splits):
 # calculate how many times we need to split a job (basically how many days to complete a job so we can assign extension letters)
 def Calculate_Splits(job):
     
+    # calculate the number of splits required for the job based on molds needed and daily limit
     molds_needed = math.ceil(job[COL_MOLDS_NEEDED])
     
     # round up mold count as we cannot produce partial molds
@@ -173,16 +221,20 @@ def Calculate_Splits(job):
 
 # prep job for push into daily mold schedule format
 def Expand_Job(job):
+    # prepare job for expansion into multiple schedule rows based on splits and extensions
     molds_needed = math.ceil(job[COL_MOLDS_NEEDED])
 
     splits = Calculate_Splits(job)
 
     extensions = get_extensions(splits)
 
+    # initialize list to hold expanded rows for each extension
     rows = []
 
+    # track the number of molds remaining to be scheduled for this job
     molds_remaining = molds_needed
 
+    # determine the daily mold limit for this job
     daily_limit = Get_daily_mold_limit(job)
 
     # find which is lesser, molds needed or max molds
@@ -191,7 +243,7 @@ def Expand_Job(job):
         molds_for_ext = min(
             daily_limit, molds_remaining
         )
-
+        # create a new row for this extension with the calculated molds and other details
         row = job.copy()
 
         row["EXT"] = ext
@@ -204,6 +256,7 @@ def Expand_Job(job):
             row[COL_POUR_WEIGHT]
         )
 
+        # add the expanded row to the list of rows for this job extension
         rows.append(row)
 
         molds_remaining -= molds_for_ext
