@@ -188,7 +188,7 @@ def Mold_Scheduler(ReadyToMold):
 # function to assign extension letter based on the number of splits required for a job  
 def get_extensions(num_splits):
     if num_splits == 1:
-         return ["L"]
+         return [""]
     
     # create list to assign extensions for that specific job - will need called for each row?
     extensions = []
