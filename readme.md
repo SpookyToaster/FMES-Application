@@ -41,3 +41,26 @@
 # ├── exports.py            # Excel export functions
 # ├── io_utils.py           # File reading
 # └── models.py             # Optional later
+
+
+Production ERP/MES
+2
+|
+3
+| Nightly Refresh
+4
+v
+5
+SQL Server 2022 (Reporting Copy)
+6
+|
+7
++--> Python Scheduler
+8
+|
+9
++--> Power BI
+10
+|
+11
++--> Ad hoc Analysis

@@ -297,6 +297,13 @@ def Scheduled_rows_test():
             f"{row['Molds for EXT']} molds"
         )
 
+
+# =====================================================================================================
+# CAUTION BELOW HERE IS UNDOCUMENTED AI SLOP, BUT IT WORKS. WILL REFACTOR AND COMMENT WHEN TIME ALLOWS.
+# =====================================================================================================
+
+
+
 # checks row for casting type and assigns limit per day that can be made
 def Get_daily_mold_limit(job):
     pour_weight = job[COL_POUR_WEIGHT]
