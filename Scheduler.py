@@ -29,6 +29,14 @@
 # assign schedule days, and print the schedule by bucket.
 # =======================================================
 
+# =======================================================
+# Concerns and considerations for developement
+# 1. How to ensure if an order is partially poured it is still scheduled until complete. 
+# and builds a mold schedule while considering daily mold limits.
+# It also provides functions to expand jobs into multiple extensions,
+# assign schedule days, and print the schedule by bucket.
+# =======================================================
+
 
 # =======================================================
 # Need to Refactor
@@ -52,29 +60,17 @@ import string
 from datetime import datetime, timedelta
 
 import pandas as pd
-from fuzzywuzzy import process  # May be removed if source data remains consistent
+#from fuzzywuzzy import process  # May be removed if source data remains consistent
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Border, Side
 
+# saving for later - need to create a GUI for users for easier interaction with the scheduler.
+#import PyQT6 
 
-# // =======================================================
-# // Global Variables - declare constant variables
-# // =======================================================
-COL_HOLD = "Hold"
-COL_SCHEDULED = "Scheduled"
-COL_DUE_DATE = "Due Date"
-COL_JOB_NUMBER = "Job Number"
-COL_MOLDS_NEEDED = "Molds Needed"
-COL_POUR_WEIGHT = "Pour Weight"
-COL_JOB_TYPE = "Job Type"
-COL_ALLOY = "Alloy"
-COL_CAST_TYPE = "Casting Type"
-# change as needed
+import config.py
 
-# Daily Molds limits, change as needed.
-max_l_molds_per_day = 30
-max_f_molds_per_day = 3
+# // MOVED GLOBAL VARIABLES TO CONFIG.PY // 
 
 # dictionary to track job counts as the filtering
 # incremented during mold scheduler
@@ -94,13 +90,13 @@ schedule_days = {
 }
 
 EXPORT_COLUMNS = {
-    COL_DUE_DATE: "Due Date",
+    config.COL_DUE_DATE: "Due Date",
     "Customer Name": "Customer Name",
     "Part Number": "Part Number",
-    COL_JOB_NUMBER: "Job Number",
+    config.COL_JOB_NUMBER: "Job Number",
     "EXT": "EXT",
-    COL_ALLOY: "Alloy",
-    COL_CAST_TYPE: "Mold Type",
+    config.COL_ALLOY: "Alloy",
+    config.COL_CAST_TYPE: "Mold Type",
     "Quantity of Molds": "Quantity of Molds",
     "Castings Per Mold": "Castings Per Mold",
     "Quantity of Cores": "Cores Per Mold",
@@ -149,32 +145,32 @@ def Mold_Scheduler(ReadyToMold):
     for row, job in ReadyToMold.iterrows():
 
         # Filter out blank rows
-        if pd.isna(job[COL_JOB_NUMBER]): 
+        if pd.isna(job[config.COL_JOB_NUMBER]): 
             filtered_job_counts["blank"] += 1
             continue
          
         # filter checks for On hold, already scheduled, or all molds completed, or if investment job by job type or cast type
-        if str(job[COL_HOLD]).upper() == "YES":
+        if str(job[config.COL_HOLD]).upper() == "YES":
             filtered_job_counts["hold"] += 1
             continue
         
         # Filters out investments jobs based on job type
-        if str(job[COL_JOB_TYPE]).upper() in ["IFA", "IFC"]:
+        if str(job[config.COL_JOB_TYPE]).upper() in ["IFA", "IFC"]:
             filtered_job_counts["job_type"] += 1
             continue
         
         # filters out jobs that are already scheduled
-        if str(job[COL_SCHEDULED]).upper() == "YES":
+        if str(job[config.COL_SCHEDULED]).upper() == "YES":
             filtered_job_counts["scheduled"] += 1
             continue
 
         # filters out investment casting jobs based on cast type
-        if str(job[COL_CAST_TYPE]).upper() == "I":
+        if str(job[config.COL_CAST_TYPE]).upper() == "I":
             filtered_job_counts["cast_type"] += 1
             continue
             
         # filters out jobs that require no molds
-        if job[COL_MOLDS_NEEDED] <= 0:
+        if job[config.COL_MOLDS_NEEDED] <= 0:
             filtered_job_counts["no_molds"] += 1
             continue
         
@@ -194,7 +190,6 @@ def get_extensions(num_splits):
     extensions = []
 
     # if only one split is needed, return "L" as the extension
-    # NEED TO UPDATE, ONLY ADD EXTENSIONS AS REQUIRED, IE: IF JOB IS NOT SPLIT, NO EXTENSIONS ARE ADDED INCLUDING "L"
     alphabet = list(string.ascii_uppercase)
 
     # Assign extensions for each split of the job
@@ -210,7 +205,7 @@ def get_extensions(num_splits):
 def Calculate_Splits(job):
     
     # calculate the number of splits required for the job based on molds needed and daily limit
-    molds_needed = math.ceil(job[COL_MOLDS_NEEDED])
+    molds_needed = math.ceil(job[config.COL_MOLDS_NEEDED])
     
     # round up mold count as we cannot produce partial molds
     daily_limit = Get_daily_mold_limit(job)
@@ -222,7 +217,7 @@ def Calculate_Splits(job):
 # prep job for push into daily mold schedule format
 def Expand_Job(job):
     # prepare job for expansion into multiple schedule rows based on splits and extensions
-    molds_needed = math.ceil(job[COL_MOLDS_NEEDED])
+    molds_needed = math.ceil(job[config.COL_MOLDS_NEEDED])
 
     splits = Calculate_Splits(job)
 
@@ -253,7 +248,7 @@ def Expand_Job(job):
     
         row["Total Weight per EXT"] = (
             molds_for_ext *
-            row[COL_POUR_WEIGHT]
+            row[config.COL_POUR_WEIGHT]
         )
 
         # add the expanded row to the list of rows for this job extension
@@ -280,9 +275,9 @@ def jobs_to_schedule_test():
 
     for job in Jobs_to_schedule:
         print(
-            f"{job[COL_JOB_NUMBER]} | "
+            f"{job[config.COL_JOB_NUMBER]} | "
             f"{job['Customer Name']} | "
-            f"Molds Needed: {job[COL_MOLDS_NEEDED]}"
+            f"Molds Needed: {job[config.COL_MOLDS_NEEDED]}"
         )
 
     print(f"\nTotal Jobs Selected: {len(Jobs_to_schedule)}")
@@ -292,7 +287,7 @@ def Scheduled_rows_test():
     
     for row in Schedule_rows:
         print(
-            f"{row[COL_JOB_NUMBER]}"
+            f"{row[config.COL_JOB_NUMBER]}"
             f"{row['EXT']} | "
             f"{row['Molds for EXT']} molds"
         )
@@ -306,12 +301,12 @@ def Scheduled_rows_test():
 
 # checks row for casting type and assigns limit per day that can be made
 def Get_daily_mold_limit(job):
-    pour_weight = job[COL_POUR_WEIGHT]
+    pour_weight = job[config.COL_POUR_WEIGHT]
 
     if pour_weight > 300:
         return 3
     
-    casting_type = str(job[COL_CAST_TYPE]).upper()
+    casting_type = str(job[config.COL_CAST_TYPE]).upper()
 
     if casting_type == "F":
         return 3
@@ -321,10 +316,10 @@ def Get_daily_mold_limit(job):
 
 def Is_F_Job(job):
 
-    if job[COL_POUR_WEIGHT] > 300:
+    if job[config.COL_POUR_WEIGHT] > 300:
         return True
 
-    return str(job[COL_CAST_TYPE]).upper() == "F"
+    return str(job[config.COL_CAST_TYPE]).upper() == "F"
 
 
 def Assign_days(schedule_df):
@@ -344,7 +339,7 @@ def Assign_days(schedule_df):
 
         bucket = "F" if Is_F_Job(row) else "L"
 
-        job_num = row[COL_JOB_NUMBER]
+        job_num = row[config.COL_JOB_NUMBER]
 
         part_num = row["Part Number"]
 
@@ -365,9 +360,9 @@ def Assign_days(schedule_df):
                 part_usage[day][part_num] = 0
             
             capacity = (
-                max_f_molds_per_day
+                config.max_f_molds_per_day
                 if bucket == "F"
-                else max_l_molds_per_day
+                else config.max_l_molds_per_day
             )
 
             if (
@@ -413,8 +408,8 @@ def print_bucket(Schedule_Data_Frame):
 
         print(
             f"Day {day}: "
-            f"L={l_molds}/{max_l_molds_per_day}, "
-            f"F={f_molds}/{max_f_molds_per_day}"
+            f"L={l_molds}/{config.max_l_molds_per_day}, "
+            f"F={f_molds}/{config.max_f_molds_per_day}"
         )
 
 def Build_Daily_Schedules(Schedule_Data_Frame):
@@ -426,7 +421,7 @@ def Build_Daily_Schedules(Schedule_Data_Frame):
             Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
             .copy()
             .sort_values(
-                by=[COL_ALLOY,COL_JOB_NUMBER]
+                by=[config.COL_ALLOY,config.COL_JOB_NUMBER]
             )
         )
     return daily_schedules
@@ -459,13 +454,13 @@ def Build_Daily_Export_Blocks(
 
             "rows": df[
                 [
-                    COL_DUE_DATE,
+                    config.COL_DUE_DATE,
                     "Customer Name",
                     "Part Number",
-                    COL_JOB_NUMBER,
+                    config.COL_JOB_NUMBER,
                     "EXT",
-                    COL_ALLOY,
-                    COL_CAST_TYPE,
+                    config.COL_ALLOY,
+                    config.COL_CAST_TYPE,
                     "Quantity of Molds",
                     "Castings Per Mold",
                     "Quantity of Cores",
@@ -563,13 +558,13 @@ def Build_Excel_Rows(export_blocks):
         for _, row in block["rows"].iterrows():
 
             excel_rows.append([
-                row.get(COL_DUE_DATE, ""),
+                row.get(config.COL_DUE_DATE, ""),
                 row.get("Customer Name", ""),
                 row.get("Part Number", ""),
-                row.get(COL_JOB_NUMBER, ""),
+                row.get(config.COL_JOB_NUMBER, ""),
                 row.get("EXT", ""),
-                row.get(COL_ALLOY, ""),
-                row.get(COL_CAST_TYPE, ""),
+                row.get(config.COL_ALLOY, ""),
+                row.get(config.COL_CAST_TYPE, ""),
                 row.get("Quantity of Molds", ""),
                 row.get("Castings Per Mold", ""),
                 row.get("Quantity of Cores", ""),
@@ -690,13 +685,13 @@ def Export_Mold_Schedule(
         for _, row in block["rows"].iterrows():
 
             values = [
-                row.get(COL_DUE_DATE, ""),
+                row.get(config.COL_DUE_DATE, ""),
                 row.get("Customer Name", ""),
                 row.get("Part Number", ""),
-                row.get(COL_JOB_NUMBER, ""),
+                row.get(config.COL_JOB_NUMBER, ""),
                 row.get("EXT", ""),
-                row.get(COL_ALLOY, ""),
-                row.get(COL_CAST_TYPE, ""),
+                row.get(config.COL_ALLOY, ""),
+                row.get(config.COL_CAST_TYPE, ""),
                 row.get("Quantity of Molds", ""),
                 row.get("Castings Per Mold", ""),
                 row.get("Quantity of Cores", ""),
@@ -791,9 +786,9 @@ def Schedule_Molds():
     Schedule_Data_Frame
     .sort_values(
         by=[
-            COL_ALLOY,
-            COL_DUE_DATE,
-            COL_JOB_NUMBER,
+            config.COL_ALLOY,
+            config.COL_DUE_DATE,
+            config.COL_JOB_NUMBER,
             "Extension_Seq"
         ],
         ascending=[
@@ -819,9 +814,9 @@ def Schedule_Molds():
     print(
         Schedule_Data_Frame[
             [
-                COL_JOB_NUMBER,
+                config.COL_JOB_NUMBER,
                 "EXT",
-                COL_ALLOY,
+                config.COL_ALLOY,
                 "Molds for EXT",
                 "Schedule Day"
             ]
