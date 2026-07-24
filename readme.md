@@ -1,67 +1,44 @@
 # Production Scheduler
 
 **Author:** Logan Burkardt  
-**Last Updated:** July 13, 2026 @ 12:41 PM
+**Last Updated:** July 24, 2026
+
+---
+
+## Overview
+
+Production Scheduler is a Python-based manufacturing scheduling tool that generates mold schedules from the Open Order Report (OOR).
+
+The application filters and prioritizes work ready for molding while enforcing daily mold capacity limits. The goal is to replace manual scheduling processes with a repeatable, data-driven workflow.
 
 ---
 
 ## Current Functionality
 
-The scheduler currently:
+### Data Processing
 
 - Reads **Open Order Report (OOR).xlsx**
 - Identifies jobs ready for molding
-- Automatically excludes:
-  - On Hold jobs
-  - Already Scheduled jobs
-  - Jobs requiring 0 molds
-  - Investment castings (`IFA`, `IFC`, `I`)
+- Expands jobs into required mold extensions
+- Assigns jobs to available production days
 
----
+### Automatic Exclusions
 
-## Planned Development
+The scheduler automatically excludes:
 
-### Scheduling
-- Push mold schedule into daily production schedule
-- Build Melt WIP schedule
-- Build Casting/Cleaning WIP schedule
+- On Hold jobs
+- Already Scheduled jobs
+- Jobs requiring zero molds
+- Investment castings (`IFA`, `IFC`, `I`)
 
-### Automation
-- Automate database exports
-- Consolidate file repositories into a single location
+### Scheduling Features
 
----
-
-## Description
-
-This application reads the **Open Order Report (OOR)**, filters jobs that are ready for molding, and builds a mold schedule while respecting daily mold capacity limits.
-
-### Key Features
-
-- Job filtering and qualification
-- Schedule generation
+- Job qualification and filtering
+- Mold schedule generation
 - Daily mold capacity management
-- Multi-extension job expansion
-- Day assignment logic
-- Schedule reporting by bucket
-
----
-
-## Planned Refactor
-
-### Target Project Structure
-
-```text
-scheduler/
-│
-├── Scheduler.py          # Main entry point
-├── config.py             # Constants and settings
-├── schedule_logic.py     # Filtering, splitting, day assignment
-├── schedule_builder.py   # Daily schedule creation
-├── exports.py            # Excel export functions
-├── io_utils.py           # File reading utilities
-└── models.py             # Data models (future)
-```
+- Multi-extension job handling
+- Schedule bucket assignment
+- Schedule reporting and export
 
 ---
 
@@ -83,13 +60,39 @@ SQL Server 2022 (Reporting Copy)
 
 ---
 
-## Long-Term Vision
+## Business Objective
 
-Move scheduling logic away from manually maintained spreadsheets and toward a centralized reporting database that supports:
+The scheduler provides a centralized and repeatable method for planning molding operations while reducing manual effort, spreadsheet maintenance, and scheduling inconsistencies.
 
-- Automated schedule generation
-- Production planning
-- WIP tracking
-- Reporting and analytics
-- Power BI integration
-- Reduced manual data entry
+Key objectives include:
+
+- Improving schedule accuracy
+- Increasing production visibility
+- Reducing manual planning effort
+- Supporting future production reporting
+- Providing a foundation for WIP tracking and analytics
+
+---
+
+## Technology Stack
+
+- Python
+- SQL Server 2022
+- ODBC Connectivity
+- Excel-Based Inputs
+- Power BI Reporting
+
+---
+
+## Future Direction
+
+The long-term vision is to evolve the scheduler into a production planning and visibility platform that supports:
+
+- Persistent schedule management
+- Work-in-progress (WIP) tracking
+- Melt, Casting, and Cleaning schedules
+- Historical schedule analysis
+- Automated reporting and notifications
+- Power BI dashboards and analytics
+
+For planned enhancements and development priorities, see **ROADMAP.md**.

@@ -4,18 +4,20 @@
 
 import math
 import string
+
+# using datetime to manage scheduling of molds depending on due dates and daily limits
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 # May be removed if source data remains consistent
-# from fuzzywuzzy import process  
+from fuzzywuzzy import process  
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Border, Side
 
 # Saving for later - need to create a GUI for users for easier interaction with the scheduler.
-# import PyQT6 
+import PyQT6 
 
 #consider moving from config to constants?
 from config import Columns
