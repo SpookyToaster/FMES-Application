@@ -249,7 +249,7 @@ def Scheduled_rows_test():
 
 
 # =====================================================================================================
-# CAUTION BELOW HERE IS UNDOCUMENTED AI SLOP, BUT IT WORKS. WILL REFACTOR AND COMMENT WHEN TIME ALLOWS.
+# CAUTION BELOW HERE REQUIRES COMMENTING. CURRENT VERSION WORKS. WILL REFACTOR AND COMMENT WHEN TIME ALLOWS.
 # =====================================================================================================
 
 # checks row for casting type and assigns limit per day that can be made
