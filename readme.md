@@ -9,7 +9,30 @@
 
 Production Scheduler is a Python-based mold scheduling tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports a formatted mold schedule workbook.
 
-The program now uses a modular layout instead of a single monolithic script. `Scheduler.py` is the orchestration entrypoint, while the core work lives in dedicated modules for input, filtering, schedule building, and export.
+The program now uses a modular layout instead of a single monolithic script. [Scheduler.py](Scheduler.py) is the orchestration entrypoint, while the core work lives in dedicated modules for input, filtering, schedule building, and export.
+
+---
+
+## Status Snapshot
+
+### Completed
+
+- Modular refactor of mold scheduling logic into dedicated modules
+- Merge conflict cleanup and stable orchestration entrypoint
+- Unit and integration test coverage for scheduling boundaries
+- Local credential hardening using environment variables
+- Startup environment validation utility for DB configuration
+
+### In Progress
+
+- SQL Server integration beyond basic connection setup
+- Persistent schedule state between runs
+
+### Not Started
+
+- Melt, casting, and cleaning schedule pipelines
+- Automated reporting and distribution
+- Power BI data publication pipeline
 
 ---
 
@@ -29,6 +52,7 @@ The program now uses a modular layout instead of a single monolithic script. `Sc
 
 ### Tests
 
+- [tests/test_database.py](tests/test_database.py)
 - [tests/test_scheduler_io.py](tests/test_scheduler_io.py)
 - [tests/test_scheduler_filter.py](tests/test_scheduler_filter.py)
 - [tests/test_scheduler_build.py](tests/test_scheduler_build.py)
@@ -44,6 +68,7 @@ The program now uses a modular layout instead of a single monolithic script. `Sc
 - Reads the Open Order Report from the configured Excel file.
 - Strips whitespace from column headers after loading.
 - Filters out rows that are not eligible for molding.
+- Uses modular orchestration to run each scheduling stage.
 
 ### Scheduling Rules
 
@@ -105,7 +130,10 @@ The public entry points now wrap failures in contextual `RuntimeError` messages 
 - File load failures report the input workbook and sheet.
 - Filtering failures report the scheduling stage.
 - Build and export failures identify the step that failed.
-- `Scheduler.py` also guards the full orchestration path.
+- [Scheduler.py](Scheduler.py) also guards the full orchestration path.
+- [Database.py](Database.py) validates DB environment configuration and reports missing variables clearly.
+
+Use [check_db_env.py](check_db_env.py) before running DB-dependent tasks.
 
 ---
 
@@ -119,6 +147,7 @@ python -m unittest discover -s tests -p "test_*.py"
 
 The current suite covers:
 
+- database environment validation
 - file loading
 - filtering rules
 - job expansion and day assignment
@@ -146,7 +175,15 @@ Key objectives include:
 - Python
 - pandas
 - openpyxl
+- pyodbc
 - Excel-based inputs and outputs
+
+## Security Notes
+
+- Credentials are not stored in source files.
+- Use local environment variables for DB settings.
+- Keep real values out of git-tracked files.
+- [.env.example](.env.example) contains placeholders only.
 
 ---
 
