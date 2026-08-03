@@ -114,6 +114,58 @@ class SchedulerBuildTests(unittest.TestCase):
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2, 2, 3])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4, 2, 2])
 
+    def test_daily_schedules_assign_heat_numbers_by_alloy_and_weight_limit(self):
+        schedule_df = pd.DataFrame([
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8001",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 600,
+                "Molds for EXT": 2,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8002",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 600,
+                "Molds for EXT": 2,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8003",
+                Columns.COL_ALLOY: "MN STEEL",
+                "Total Weight per EXT": 500,
+                "Molds for EXT": 1,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8004",
+                Columns.COL_ALLOY: "WCB",
+                "Total Weight per EXT": 1500,
+                "Molds for EXT": 3,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8005",
+                Columns.COL_ALLOY: "WCB",
+                "Total Weight per EXT": 1000,
+                "Molds for EXT": 2,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8006",
+                Columns.COL_ALLOY: "WCB",
+                "Total Weight per EXT": 800,
+                "Molds for EXT": 2,
+            },
+        ])
+
+        daily_schedules = Build_Daily_Schedules(schedule_df)
+        day1 = daily_schedules[1]
+
+        self.assertIn("Heat #", day1.columns)
+        self.assertEqual(day1["Heat #"].tolist(), [1, 1, 2, 3, 4, 4])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ from scheduler_build import (
 
 from scheduler_export import (
     Build_Daily_Export_Blocks,
+    Export_Heat_Summary,
     Export_Mold_Schedule,
     Print_Export_Blocks,
 )
@@ -81,4 +82,10 @@ if __name__ == "__main__":
         r"\Quality\Schedule\Output\Mold Schedule.xlsx"
     )
 
+    heat_summary_output_file = (
+        r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
+        r"\Quality\Schedule\Output\Heat Summary.xlsx"
+    )
+
     Export_Mold_Schedule(export_blocks, output_file)
+    Export_Heat_Summary(export_blocks, heat_summary_output_file)

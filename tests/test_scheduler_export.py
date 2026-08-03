@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import Columns
-from scheduler_export import Build_Daily_Export_Blocks, Build_Excel_Rows, Export_Mold_Schedule
+from scheduler_export import Build_Daily_Export_Blocks, Build_Excel_Rows, Build_Heat_Summary_Rows, Export_Heat_Summary, Export_Mold_Schedule
 
 
 class SchedulerExportTests(unittest.TestCase):
@@ -42,6 +42,7 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(blocks[1]["weight_total"], 25)
         self.assertEqual(blocks[1]["mold_total"], 2)
         self.assertGreater(len(excel_rows), 0)
+        self.assertEqual(excel_rows[1][-1], "Heat #")
 
     def test_export_mold_schedule_writes_file(self):
         frame = pd.DataFrame([
@@ -58,6 +59,7 @@ class SchedulerExportTests(unittest.TestCase):
                 "Quantity of Cores": 0,
                 "Total Weight per EXT": 25,
                 "Molds for EXT": 2,
+                "Heat #": 1,
             }
         ])
 
@@ -83,6 +85,8 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(due_date_cell.value.date().isoformat(), "2026-08-04")
             self.assertEqual(due_date_cell.value.time().isoformat(), "00:00:00")
             self.assertEqual(due_date_cell.number_format, "m/d/yyyy")
+            self.assertEqual(ws.cell(3, 13).value, "Heat #")
+            self.assertEqual(ws.cell(4, 13).value, 1)
 
     def test_export_mold_schedule_wraps_save_failures(self):
         export_blocks = {
@@ -100,6 +104,100 @@ class SchedulerExportTests(unittest.TestCase):
                 Export_Mold_Schedule(export_blocks, "locked.xlsx")
 
         self.assertIn("Failed while exporting mold schedule", str(context.exception))
+
+    def test_build_heat_summary_rows_groups_by_day_and_heat(self):
+        frame = pd.DataFrame([
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 600,
+                "Molds for EXT": 2,
+                "Heat #": 1,
+            },
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 600,
+                "Molds for EXT": 2,
+                "Heat #": 1,
+            },
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_ALLOY: "MN STEEL",
+                "Total Weight per EXT": 500,
+                "Molds for EXT": 1,
+                "Heat #": 2,
+            },
+        ])
+
+        export_blocks = {
+            1: {
+                "date": pd.Timestamp("2026-08-04"),
+                "weekday": "Tuesday",
+                "rows": frame,
+                "weight_total": 1700,
+                "mold_total": 5,
+            }
+        }
+
+        summary = Build_Heat_Summary_Rows(export_blocks)
+        self.assertEqual(len(summary), 2)
+        self.assertEqual(summary[0]["Heat #"], 1)
+        self.assertEqual(summary[0]["Alloy"], "LEW15")
+        self.assertEqual(summary[0]["Total Weight (lbs)"], 1200.0)
+        self.assertEqual(summary[0]["Total Molds"], 4.0)
+        self.assertEqual(summary[1]["Heat #"], 2)
+        self.assertEqual(summary[1]["Alloy"], "MN STEEL")
+
+    def test_export_heat_summary_writes_file(self):
+        frame = pd.DataFrame([
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 600,
+                "Molds for EXT": 2,
+                "Heat #": 1,
+            }
+        ])
+
+        export_blocks = {
+            1: {
+                "date": pd.Timestamp("2026-08-04"),
+                "weekday": "Tuesday",
+                "rows": frame,
+                "weight_total": 600,
+                "mold_total": 2,
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "heat_summary.xlsx"
+            Export_Heat_Summary(export_blocks, str(output_file))
+            self.assertTrue(output_file.exists())
+
+            wb = load_workbook(output_file)
+            ws = wb["Heat Summary"]
+            self.assertEqual(ws.cell(1, 1).value, "Schedule Date")
+            self.assertEqual(ws.cell(1, 3).value, "Heat #")
+            self.assertEqual(ws.cell(2, 3).value, 1)
+            self.assertEqual(ws.cell(2, 4).value, "LEW15")
+
+    def test_export_heat_summary_wraps_save_failures(self):
+        export_blocks = {
+            1: {
+                "date": pd.Timestamp("2026-08-04"),
+                "weekday": "Tuesday",
+                "rows": pd.DataFrame(),
+                "weight_total": 0,
+                "mold_total": 0,
+            }
+        }
+
+        with patch("scheduler_export.Workbook.save", side_effect=PermissionError("locked")):
+            with self.assertRaises(RuntimeError) as context:
+                Export_Heat_Summary(export_blocks, "locked_heat.xlsx")
+
+        self.assertIn("Failed while exporting heat summary", str(context.exception))
 
 
 if __name__ == "__main__":

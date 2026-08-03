@@ -21,6 +21,10 @@ def Build_Daily_Export_Blocks(Daily_Schedules, Day_Dates):
         export_blocks = {}
 
         for day, df in Daily_Schedules.items():
+            df = df.copy()
+            if "Heat #" not in df.columns:
+                df["Heat #"] = ""
+
             weight_total = df["Total Weight per EXT"].fillna(0).sum()
             mold_total = df["Molds for EXT"].fillna(0).sum()
 
@@ -41,6 +45,7 @@ def Build_Daily_Export_Blocks(Daily_Schedules, Day_Dates):
                         "Quantity of Cores",
                         "Total Weight per EXT",
                         "Molds for EXT",
+                        "Heat #",
                     ]
                 ].copy(),
                 "weight_total": weight_total,
@@ -88,6 +93,7 @@ def Build_Excel_Rows(export_blocks):
             "Cores Per Mold",
             "Total Weight per EXT",
             "# of Molds for EXT",
+            "Heat #",
         ])
 
         for _, row in block["rows"].iterrows():
@@ -104,9 +110,10 @@ def Build_Excel_Rows(export_blocks):
                 row.get("Quantity of Cores", ""),
                 row.get("Total Weight per EXT", ""),
                 row.get("Molds for EXT", ""),
+                row.get("Heat #", ""),
             ])
 
-        excel_rows.append(["TOTALS", "", "", "", "", "", "", "", "", "", block["weight_total"], block["mold_total"]])
+        excel_rows.append(["TOTALS", "", "", "", "", "", "", "", "", "", block["weight_total"], block["mold_total"], ""])
         excel_rows.append([])
 
     return excel_rows
@@ -129,7 +136,7 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
             ws.cell(current_row, 2, block["date"].strftime("%m/%d/%Y"))
             ws.cell(current_row, 4, block["weekday"])
 
-            for col in range(1, 13):
+            for col in range(1, 14):
                 ws.cell(current_row, col).font = bold
 
             current_row += 2
@@ -147,6 +154,7 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
                 "Cores Per Mold",
                 "Total Weight per EXT",
                 "# of Molds for EXT",
+                "Heat #",
             ]
 
             for col_num, header in enumerate(headers, start=1):
@@ -170,6 +178,7 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
                     row.get("Quantity of Cores", ""),
                     row.get("Total Weight per EXT", ""),
                     row.get("Molds for EXT", ""),
+                    row.get("Heat #", ""),
                 ]
 
                 for col_num, value in enumerate(values, start=1):
@@ -189,6 +198,7 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
             current_row += 3
 
         widths = {"A": 12, "B": 30, "C": 25, "D": 15, "E": 6, "F": 15, "G": 12, "H": 15, "I": 15, "J": 15, "K": 18, "L": 15}
+        widths["M"] = 10
 
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
@@ -197,3 +207,122 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
         print(f"Saved: {output_file}")
     except Exception as exc:
         raise RuntimeError(f"Failed while exporting mold schedule to {output_file}") from exc
+
+
+def Build_Heat_Summary_Rows(export_blocks):
+    summary_rows = []
+
+    for day in sorted(export_blocks.keys()):
+        block = export_blocks[day]
+        rows = block["rows"].copy()
+
+        if rows.empty or "Heat #" not in rows.columns:
+            continue
+
+        rows["Total Weight per EXT"] = pd.to_numeric(
+            rows["Total Weight per EXT"], errors="coerce"
+        ).fillna(0)
+        rows["Molds for EXT"] = pd.to_numeric(
+            rows["Molds for EXT"], errors="coerce"
+        ).fillna(0)
+
+        grouped = rows.groupby("Heat #", dropna=False, sort=True)
+
+        for heat_num, heat_df in grouped:
+            if pd.isna(heat_num) or heat_num == "":
+                continue
+
+            alloy_values = [
+                str(v)
+                for v in heat_df[Columns.COL_ALLOY].dropna().unique().tolist()
+                if str(v) != ""
+            ]
+            alloy = alloy_values[0] if alloy_values else ""
+
+            summary_rows.append(
+                {
+                    "Schedule Date": block["date"].date() if hasattr(block["date"], "date") else block["date"],
+                    "Weekday": block["weekday"],
+                    "Heat #": int(heat_num),
+                    "Alloy": alloy,
+                    "Total Weight (lbs)": float(heat_df["Total Weight per EXT"].sum()),
+                    "Total Molds": float(heat_df["Molds for EXT"].sum()),
+                    "Rows in Heat": int(len(heat_df)),
+                }
+            )
+
+    return summary_rows
+
+
+def Export_Heat_Summary(export_blocks, output_file="Heat Summary.xlsx"):
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Heat Summary"
+
+        headers = [
+            "Schedule Date",
+            "Weekday",
+            "Heat #",
+            "Alloy",
+            "Total Weight (lbs)",
+            "Total Molds",
+            "Rows in Heat",
+        ]
+
+        bold = Font(bold=True)
+        thin = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin"),
+        )
+
+        for col_num, header in enumerate(headers, start=1):
+            cell = ws.cell(1, col_num, header)
+            cell.font = bold
+            cell.border = thin
+
+        summary_rows = Build_Heat_Summary_Rows(export_blocks)
+        current_row = 2
+
+        for row in summary_rows:
+            values = [
+                row["Schedule Date"],
+                row["Weekday"],
+                row["Heat #"],
+                row["Alloy"],
+                row["Total Weight (lbs)"],
+                row["Total Molds"],
+                row["Rows in Heat"],
+            ]
+
+            for col_num, value in enumerate(values, start=1):
+                cell = ws.cell(current_row, col_num, value)
+                cell.border = thin
+                if col_num == 1 and value != "":
+                    cell.number_format = "m/d/yyyy"
+                if col_num == 5:
+                    cell.number_format = "#,##0.00"
+                if col_num == 6:
+                    cell.number_format = "#,##0"
+
+            current_row += 1
+
+        widths = {
+            "A": 14,
+            "B": 12,
+            "C": 8,
+            "D": 15,
+            "E": 18,
+            "F": 12,
+            "G": 12,
+        }
+
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+
+        wb.save(output_file)
+        print(f"Saved: {output_file}")
+    except Exception as exc:
+        raise RuntimeError(f"Failed while exporting heat summary to {output_file}") from exc

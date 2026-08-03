@@ -9,6 +9,7 @@ from config import Columns, DailyMoldLimits
 
 EXTENSION_WEIGHT_LIMIT_LBS = 2300
 EXTENSION_MOLD_LIMIT = 10
+HEAT_WEIGHT_LIMIT_LBS = 2300
 
 
 def _safe_int(value, default=0):
@@ -239,14 +240,49 @@ def print_bucket(Schedule_Data_Frame):
 
 def Build_Daily_Schedules(Schedule_Data_Frame):
     try:
+        def assign_heat_numbers(day_df):
+            if day_df.empty:
+                day_df["Heat #"] = []
+                return day_df
+
+            heat_numbers = []
+            heat_number = 0
+            current_alloy = None
+            current_heat_weight = 0.0
+
+            for _, row in day_df.iterrows():
+                alloy = str(row.get(Columns.COL_ALLOY, "") or "")
+                row_weight = float(row.get("Total Weight per EXT", 0) or 0)
+                row_weight = max(row_weight, 0)
+
+                needs_new_heat = False
+
+                if alloy != current_alloy:
+                    needs_new_heat = True
+                elif current_heat_weight + row_weight > HEAT_WEIGHT_LIMIT_LBS:
+                    needs_new_heat = True
+
+                if needs_new_heat:
+                    heat_number += 1
+                    current_alloy = alloy
+                    current_heat_weight = 0.0
+
+                current_heat_weight += row_weight
+                heat_numbers.append(heat_number)
+
+            day_df = day_df.copy()
+            day_df["Heat #"] = heat_numbers
+            return day_df
+
         daily_schedules = {}
 
         for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):
-            daily_schedules[day] = (
+            day_df = (
                 Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
                 .copy()
                 .sort_values(by=[Columns.COL_ALLOY, Columns.COL_JOB_NUMBER])
             )
+            daily_schedules[day] = assign_heat_numbers(day_df)
 
         return daily_schedules
     except Exception as exc:
