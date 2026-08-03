@@ -3,9 +3,18 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from config import Columns
-
-from scheduler_build import Assign_days, Build_Daily_Schedules, Build_Schedule_Dates, Build_Schedule_Rows, print_bucket
-from scheduler_export import Build_Daily_Export_Blocks, Export_Mold_Schedule, Print_Export_Blocks
+from scheduler_build import (
+    Assign_days,
+    Build_Daily_Schedules,
+    Build_Schedule_Dates,
+    Build_Schedule_Rows,
+    print_bucket,
+)
+from scheduler_export import (
+    Build_Daily_Export_Blocks,
+    Export_Mold_Schedule,
+    Print_Export_Blocks,
+)
 from scheduler_filter import Mold_Scheduler
 from scheduler_io import Read_File
 
@@ -50,7 +59,10 @@ def Schedule_Molds():
         print_bucket(schedule_data_frame)
 
         daily_schedules = Build_Daily_Schedules(schedule_data_frame)
-        day_dates = Build_Schedule_Dates(daily_schedules, datetime.today() + timedelta(days=1))
+        day_dates = Build_Schedule_Dates(
+            daily_schedules,
+            datetime.today() + timedelta(days=1),
+        )
         export_blocks = Build_Daily_Export_Blocks(daily_schedules, day_dates)
         Print_Export_Blocks(export_blocks)
 
@@ -58,39 +70,6 @@ def Schedule_Molds():
     except Exception as exc:
         raise RuntimeError("Schedule_Molds failed during orchestration") from exc
 
-
-
-
-
-# // =======================================================
-# // Scheduling Module - Melt
-# // =======================================================
-# def MeltScheduler():
-#     for i in MoldsCompleted:
-#         if #cell == 0 molds left:
-#             # put in list for pouring
-#         else continue
-            
-# // If job has been scheduled and mold shows complete, but no heat number assigned. Show ready to pour
-
-# // If ready to pour, read into list
-
-# // for item in list add to ready-to-pour schedule
-
-# // =======================================================
-# // Cleaning Schedule
-# // =======================================================
-# def CleanScheduler():
-#     for i in CastingsCreated():
-#         if #cell == heat number
-#             # put in list for pouring
-#         else continue
-
-# If heat number assigned, but not shipped, show on cleaning schedule sorted by due date.
-
-# =======================================================
-# Main Program Entry
-# =======================================================
 
 if __name__ == "__main__":
     export_blocks = Schedule_Molds()
