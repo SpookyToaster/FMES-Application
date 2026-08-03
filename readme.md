@@ -1,98 +1,165 @@
 # Production Scheduler
 
 **Author:** Logan Burkardt  
-**Last Updated:** July 24, 2026
+**Last Updated:** August 3, 2026
 
 ---
 
 ## Overview
 
-Production Scheduler is a Python-based manufacturing scheduling tool that generates mold schedules from the Open Order Report (OOR).
+Production Scheduler is a Python-based mold scheduling tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports a formatted mold schedule workbook.
 
-The application filters and prioritizes work ready for molding while enforcing daily mold capacity limits. The goal is to replace manual scheduling processes with a repeatable, data-driven workflow.
-
----
-
-## Current Functionality
-
-### Data Processing
-
-- Reads **Open Order Report (OOR).xlsx**
-- Identifies jobs ready for molding
-- Expands jobs into required mold extensions
-- Assigns jobs to available production days
-
-### Automatic Exclusions
-
-The scheduler automatically excludes:
-
-- On Hold jobs
-- Already Scheduled jobs
-- Jobs requiring zero molds
-- Investment castings (`IFA`, `IFC`, `I`)
-
-### Scheduling Features
-
-- Job qualification and filtering
-- Mold schedule generation
-- Daily mold capacity management
-- Multi-extension job handling
-- Schedule bucket assignment
-- Schedule reporting and export
+The program now uses a modular layout instead of a single monolithic script. `Scheduler.py` is the orchestration entrypoint, while the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
 ---
 
-## System Architecture
+## Current Structure
+
+### Orchestration
+
+- [Scheduler.py](Scheduler.py) coordinates the full scheduling pipeline.
+- It loads input, filters jobs, builds schedule rows, assigns days, groups by day, prints summaries, and exports the final workbook.
+
+### Module Boundaries
+
+- [scheduler_io.py](scheduler_io.py) reads the Open Order Report workbook.
+- [scheduler_filter.py](scheduler_filter.py) filters rows down to jobs eligible for molding.
+- [scheduler_build.py](scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
+- [scheduler_export.py](scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
+
+### Tests
+
+- [tests/test_scheduler_io.py](tests/test_scheduler_io.py)
+- [tests/test_scheduler_filter.py](tests/test_scheduler_filter.py)
+- [tests/test_scheduler_build.py](tests/test_scheduler_build.py)
+- [tests/test_scheduler_export.py](tests/test_scheduler_export.py)
+- [tests/test_scheduler_integration.py](tests/test_scheduler_integration.py)
+
+---
+
+## Current Behavior
+
+### Input Processing
+
+- Reads the Open Order Report from the configured Excel file.
+- Strips whitespace from column headers after loading.
+- Filters out rows that are not eligible for molding.
+
+### Scheduling Rules
+
+- Skips blank jobs.
+- Skips jobs on hold.
+- Skips jobs already scheduled.
+- Skips investment cast jobs (`IFA`, `IFC`, and cast type `I`).
+- Skips jobs requiring zero or fewer molds.
+- Splits large jobs into extensions based on the daily mold limit.
+- Assigns each schedule row to a day while respecting bucket capacity and per-part daily limits.
+
+### Export Output
+
+- Builds daily schedule blocks.
+- Prints day-by-day mold totals.
+- Exports a formatted Excel workbook named `Mold Schedule.xlsx`.
+
+---
+
+## Runtime Flow
 
 ```text
-Production ERP / MES
+Open Order Report.xlsx
         │
-        │ Nightly Refresh
         ▼
-SQL Server 2022 (Reporting Copy)
+Read_File()
         │
-        ├── Python Scheduler
+        ▼
+Mold_Scheduler()
         │
-        ├── Power BI
+        ▼
+Build_Schedule_Rows()
         │
-        └── Ad Hoc Analysis
+        ▼
+Assign_days()
+        │
+        ▼
+Build_Daily_Schedules()
+        │
+        ▼
+Build_Schedule_Dates()
+        │
+        ▼
+Build_Daily_Export_Blocks()
+        │
+        ▼
+Print_Export_Blocks()
+        │
+        ▼
+Export_Mold_Schedule()
 ```
+
+---
+
+## Error Handling
+
+The public entry points now wrap failures in contextual `RuntimeError` messages so problems are easier to trace during debugging.
+
+- File load failures report the input workbook and sheet.
+- Filtering failures report the scheduling stage.
+- Build and export failures identify the step that failed.
+- `Scheduler.py` also guards the full orchestration path.
+
+---
+
+## Validation
+
+Run the test suite from the project folder:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+The current suite covers:
+
+- file loading
+- filtering rules
+- job expansion and day assignment
+- export block generation and workbook writing
+- end-to-end orchestration
 
 ---
 
 ## Business Objective
 
-The scheduler provides a centralized and repeatable method for planning molding operations while reducing manual effort, spreadsheet maintenance, and scheduling inconsistencies.
+The scheduler provides a repeatable method for planning molding operations while reducing manual effort, spreadsheet maintenance, and scheduling inconsistencies.
 
 Key objectives include:
 
-- Improving schedule accuracy
-- Increasing production visibility
-- Reducing manual planning effort
-- Supporting future production reporting
-- Providing a foundation for WIP tracking and analytics
+- improving schedule accuracy
+- increasing production visibility
+- reducing manual planning effort
+- supporting future production reporting
+- providing a foundation for WIP tracking and analytics
 
 ---
 
 ## Technology Stack
 
 - Python
-- SQL Server 2022
-- ODBC Connectivity
-- Excel-Based Inputs
-- Power BI Reporting
+- pandas
+- openpyxl
+- Excel-based inputs and outputs
 
 ---
 
 ## Future Direction
 
-The long-term vision is to evolve the scheduler into a production planning and visibility platform that supports:
+The current codebase is structured so additional schedule types can be added later, such as melt or cleaning schedules, without reworking the mold scheduling pipeline.
 
-- Persistent schedule management
-- Work-in-progress (WIP) tracking
-- Melt, Casting, and Cleaning schedules
-- Historical schedule analysis
-- Automated reporting and notifications
-- Power BI dashboards and analytics
+Planned next steps still align with the roadmap:
 
-For planned enhancements and development priorities, see **ROADMAP.md**.
+- persistent schedule management
+- work-in-progress tracking
+- additional schedule types
+- historical schedule analysis
+- automated reporting and notifications
+
+For development priorities, see [Roadmap.md](Roadmap.md).
