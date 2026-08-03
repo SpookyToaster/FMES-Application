@@ -28,9 +28,10 @@ class SchedulerFilterTests(unittest.TestCase):
 
         result = Mold_Scheduler(frame)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0][Columns.COL_JOB_NUMBER], "2000")
-        self.assertEqual(filtered_job_counts["added"], 1)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][Columns.COL_JOB_NUMBER], "1003")
+        self.assertEqual(result[1][Columns.COL_JOB_NUMBER], "2000")
+        self.assertEqual(filtered_job_counts["added"], 2)
         self.assertEqual(filtered_job_counts["blank"], 1)
 
 

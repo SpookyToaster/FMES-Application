@@ -57,6 +57,21 @@ class SchedulerBuildTests(unittest.TestCase):
         day_dates = Build_Schedule_Dates(daily_schedules, pd.Timestamp("2026-08-03"))
         self.assertIn(1, day_dates)
 
+    def test_expand_job_preserves_remaining_extensions_after_partial_completion(self):
+        job = pd.Series({
+            Columns.COL_JOB_NUMBER: "5001",
+            Columns.COL_MOLDS_NEEDED: 12,
+            "Molds Completed": 6,
+            Columns.COL_POUR_WEIGHT: 100,
+            Columns.COL_CAST_TYPE: "L",
+            Columns.COL_ALLOY: "A",
+        })
+
+        expanded = Expand_Job(job)
+
+        self.assertEqual([row["EXT"] for row in expanded], ["B", "L"])
+        self.assertEqual([row["Molds for EXT"] for row in expanded], [6, 6])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,10 +31,6 @@ def Mold_Scheduler(ReadyToMold):
                 filtered_job_counts["job_type"] += 1
                 continue
 
-            if str(job[Columns.COL_SCHEDULED]).upper() == "YES":
-                filtered_job_counts["scheduled"] += 1
-                continue
-
             if str(job[Columns.COL_CAST_TYPE]).upper() == "I":
                 filtered_job_counts["cast_type"] += 1
                 continue

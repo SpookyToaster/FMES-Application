@@ -7,6 +7,15 @@ import pandas as pd
 from config import Columns, DailyMoldLimits
 
 
+def _safe_int(value, default=0):
+    try:
+        if pd.isna(value):
+            return default
+        return int(math.ceil(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def get_extensions(num_splits):
     if num_splits == 1:
         return [""]
@@ -41,22 +50,72 @@ def Calculate_Splits(job):
     return math.ceil(molds_needed / daily_limit)
 
 
+def _build_remaining_extension_plan(total_molds, completed_molds, daily_limit):
+    total_molds = max(total_molds, 0)
+    completed_molds = max(completed_molds, 0)
+
+    if total_molds <= 0:
+        return []
+
+    total_splits = math.ceil(total_molds / daily_limit)
+    extensions = get_extensions(total_splits)
+
+    chunk_sizes = []
+    molds_remaining = total_molds
+    for _ in extensions:
+        chunk = min(daily_limit, molds_remaining)
+        chunk_sizes.append(chunk)
+        molds_remaining -= chunk
+
+    remaining_plan = []
+    molds_completed_left = completed_molds
+
+    for seq, ext in enumerate(extensions):
+        chunk_size = chunk_sizes[seq]
+
+        if molds_completed_left >= chunk_size:
+            molds_completed_left -= chunk_size
+            continue
+
+        remaining_for_ext = chunk_size - molds_completed_left
+        molds_completed_left = 0
+
+        if remaining_for_ext > 0:
+            remaining_plan.append((seq, ext, remaining_for_ext))
+
+    return remaining_plan
+
+
 def Expand_Job(job):
     try:
-        molds_needed = math.ceil(job[Columns.COL_MOLDS_NEEDED])
-        splits = Calculate_Splits(job)
-        extensions = get_extensions(splits)
+        molds_needed = _safe_int(job[Columns.COL_MOLDS_NEEDED], default=0)
+        molds_completed = _safe_int(job.get("Molds Completed", 0), default=0)
+        daily_limit = Get_daily_mold_limit(job)
+        total_molds = molds_needed + molds_completed
+
+        extension_plan = _build_remaining_extension_plan(
+            total_molds=total_molds,
+            completed_molds=molds_completed,
+            daily_limit=daily_limit,
+        )
+
         rows = []
         molds_remaining = molds_needed
-        daily_limit = Get_daily_mold_limit(job)
 
-        for seq, ext in enumerate(extensions):
-            molds_for_ext = min(daily_limit, molds_remaining)
+        for seq, ext, planned_molds in extension_plan:
+            if molds_remaining <= 0:
+                break
+
+            molds_for_ext = min(planned_molds, molds_remaining)
+            if molds_for_ext <= 0:
+                continue
+
             row = job.copy()
             row["EXT"] = ext
             row["Extension_Seq"] = seq
             row["Molds for EXT"] = molds_for_ext
-            row["Total Weight per EXT"] = molds_for_ext * row[Columns.COL_POUR_WEIGHT]
+            pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+            row["Total Weight per EXT"] = molds_for_ext * max(pour_weight, 0)
             rows.append(row)
             molds_remaining -= molds_for_ext
 
