@@ -254,6 +254,37 @@ def Build_Heat_Summary_Rows(export_blocks):
     return summary_rows
 
 
+def Build_Heat_Daily_Totals_Rows(summary_rows):
+    if not summary_rows:
+        return []
+
+    summary_df = pd.DataFrame(summary_rows)
+    grouped = (
+        summary_df
+        .groupby(["Schedule Date", "Weekday"], dropna=False, sort=True)
+        .agg(
+            TotalHeats=("Heat #", "nunique"),
+            TotalWeightLbs=("Total Weight (lbs)", "sum"),
+            TotalMolds=("Total Molds", "sum"),
+        )
+        .reset_index()
+    )
+
+    daily_rows = []
+    for _, row in grouped.iterrows():
+        daily_rows.append(
+            {
+                "Schedule Date": row["Schedule Date"],
+                "Weekday": row["Weekday"],
+                "Total Heats": int(row["TotalHeats"]),
+                "Total Weight (lbs)": float(row["TotalWeightLbs"]),
+                "Total Molds": float(row["TotalMolds"]),
+            }
+        )
+
+    return daily_rows
+
+
 def Export_Heat_Summary(export_blocks, output_file="Heat Summary.xlsx"):
     try:
         wb = Workbook()
@@ -321,6 +352,55 @@ def Export_Heat_Summary(export_blocks, output_file="Heat Summary.xlsx"):
 
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+
+        ws_daily = wb.create_sheet("Daily Heat Totals")
+        daily_headers = [
+            "Schedule Date",
+            "Weekday",
+            "Total Heats",
+            "Total Weight (lbs)",
+            "Total Molds",
+        ]
+
+        for col_num, header in enumerate(daily_headers, start=1):
+            cell = ws_daily.cell(1, col_num, header)
+            cell.font = bold
+            cell.border = thin
+
+        daily_rows = Build_Heat_Daily_Totals_Rows(summary_rows)
+        current_row = 2
+
+        for row in daily_rows:
+            values = [
+                row["Schedule Date"],
+                row["Weekday"],
+                row["Total Heats"],
+                row["Total Weight (lbs)"],
+                row["Total Molds"],
+            ]
+
+            for col_num, value in enumerate(values, start=1):
+                cell = ws_daily.cell(current_row, col_num, value)
+                cell.border = thin
+                if col_num == 1 and value != "":
+                    cell.number_format = "m/d/yyyy"
+                if col_num == 4:
+                    cell.number_format = "#,##0.00"
+                if col_num == 5:
+                    cell.number_format = "#,##0"
+
+            current_row += 1
+
+        daily_widths = {
+            "A": 14,
+            "B": 12,
+            "C": 12,
+            "D": 18,
+            "E": 12,
+        }
+
+        for col, width in daily_widths.items():
+            ws_daily.column_dimensions[col].width = width
 
         wb.save(output_file)
         print(f"Saved: {output_file}")

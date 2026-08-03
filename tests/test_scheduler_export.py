@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import Columns
-from scheduler_export import Build_Daily_Export_Blocks, Build_Excel_Rows, Build_Heat_Summary_Rows, Export_Heat_Summary, Export_Mold_Schedule
+from scheduler_export import Build_Daily_Export_Blocks, Build_Excel_Rows, Build_Heat_Daily_Totals_Rows, Build_Heat_Summary_Rows, Export_Heat_Summary, Export_Mold_Schedule
 
 
 class SchedulerExportTests(unittest.TestCase):
@@ -157,6 +157,13 @@ class SchedulerExportTests(unittest.TestCase):
                 "Total Weight per EXT": 600,
                 "Molds for EXT": 2,
                 "Heat #": 1,
+            },
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_ALLOY: "LEW15",
+                "Total Weight per EXT": 400,
+                "Molds for EXT": 1,
+                "Heat #": 2,
             }
         ])
 
@@ -181,6 +188,40 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(1, 3).value, "Heat #")
             self.assertEqual(ws.cell(2, 3).value, 1)
             self.assertEqual(ws.cell(2, 4).value, "LEW15")
+
+            ws_daily = wb["Daily Heat Totals"]
+            self.assertEqual(ws_daily.cell(1, 1).value, "Schedule Date")
+            self.assertEqual(ws_daily.cell(1, 3).value, "Total Heats")
+            self.assertEqual(ws_daily.cell(2, 3).value, 2)
+            self.assertEqual(ws_daily.cell(2, 4).value, 1000)
+
+    def test_build_heat_daily_totals_rows(self):
+        summary_rows = [
+            {
+                "Schedule Date": pd.Timestamp("2026-08-04").date(),
+                "Weekday": "Tuesday",
+                "Heat #": 1,
+                "Alloy": "LEW15",
+                "Total Weight (lbs)": 600.0,
+                "Total Molds": 2.0,
+                "Rows in Heat": 1,
+            },
+            {
+                "Schedule Date": pd.Timestamp("2026-08-04").date(),
+                "Weekday": "Tuesday",
+                "Heat #": 2,
+                "Alloy": "WCB",
+                "Total Weight (lbs)": 900.0,
+                "Total Molds": 3.0,
+                "Rows in Heat": 2,
+            },
+        ]
+
+        daily_rows = Build_Heat_Daily_Totals_Rows(summary_rows)
+        self.assertEqual(len(daily_rows), 1)
+        self.assertEqual(daily_rows[0]["Total Heats"], 2)
+        self.assertEqual(daily_rows[0]["Total Weight (lbs)"], 1500.0)
+        self.assertEqual(daily_rows[0]["Total Molds"], 5.0)
 
     def test_export_heat_summary_wraps_save_failures(self):
         export_blocks = {

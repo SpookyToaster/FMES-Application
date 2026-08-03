@@ -34,6 +34,10 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 - Automated reporting and distribution
 - Power BI data publication pipeline
 
+## Considerations
+
+- Current greedy achrictecture is encountering edge case and multi-departmental optimization constraints. Design review for a staged optimized mold schedule and then optimized melt schedule is needed. 
+
 ---
 
 ## Current Structure
@@ -74,17 +78,22 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 
 - Skips blank jobs.
 - Skips jobs on hold.
-- Skips jobs already scheduled.
+- Keeps scheduled jobs that still have molds remaining.
 - Skips investment cast jobs (`IFA`, `IFC`, and cast type `I`).
 - Skips jobs requiring zero or fewer molds.
-- Splits large jobs into extensions based on the daily mold limit.
-- Assigns each schedule row to a day while respecting bucket capacity and per-part daily limits.
+- Splits jobs into extensions based on a 2300 lb cap and a 10 mold cap per extension.
+- Preserves extension continuity after partial completion by consuming completed molds from earliest extensions first.
+- Assigns each schedule row to days while respecting line/floor per-job daily limits (6/3), and allows an extension to span multiple days when needed.
+- Assigns per-day heat numbers based on alloy continuity and 2300 lb maximum per heat.
 
 ### Export Output
 
 - Builds daily schedule blocks.
 - Prints day-by-day mold totals.
-- Exports a formatted Excel workbook named `Mold Schedule.xlsx`.
+- Exports a formatted workbook named `Mold Schedule.xlsx`.
+- Exports `Heat Summary.xlsx` with:
+        - `Heat Summary` sheet (date + heat + alloy + lbs + molds)
+        - `Daily Heat Totals` sheet (heats/day + lbs/day + molds/day)
 
 ---
 
@@ -198,5 +207,33 @@ Planned next steps still align with the roadmap:
 - additional schedule types
 - historical schedule analysis
 - automated reporting and notifications
+
+## Production Scheduler Evolution Plan
+
+## Guiding Principle
+
+Do not optimize for the perfect schedule.
+
+Optimize for:
+
+- Stability
+- Recoverability
+- Ease of execution
+- Minimal planner intervention
+
+Production conditions will change daily. The system should adapt rather than attempting to predict perfectly.
+
+### Objective
+
+Evolve the current mold scheduler from a static schedule generator into a production planning system that:
+
+- Maintains schedule state between runs
+- Tracks actual production completion
+- Handles remakes and priority changes
+- Generates melt schedules from real available work
+- Minimizes schedule churn
+- Produces schedules operators can execute with minimal planner intervention
+
+Current scheduler successfully handles mold capacity constraints and extension scheduling. Future work should focus on schedule persistence, execution feedback, and melt planning.
 
 For development priorities, see [Roadmap.md](Roadmap.md).

@@ -16,6 +16,19 @@ The long-term goal is to evolve this application from a spreadsheet-based mold s
 - Publish data to Power BI
 - Distribute reports automatically to users
 
+## Guiding Principle
+
+Do not optimize for the perfect schedule.
+
+Optimize for:
+
+- Stability
+- Recoverability
+- Ease of execution
+- Minimal planner intervention
+
+Production conditions will change daily. The system should adapt rather than attempting to predict perfectly.
+
 ---
 
 ## Current Program Status
