@@ -94,6 +94,26 @@ class SchedulerBuildTests(unittest.TestCase):
         self.assertEqual(assigned["EXT"].tolist(), ["A", "A"])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4])
 
+    def test_partial_completion_and_multi_day_extensions_work_together(self):
+        job = pd.Series({
+            Columns.COL_JOB_NUMBER: "7001",
+            Columns.COL_MOLDS_NEEDED: 14,
+            "Molds Completed": 10,
+            Columns.COL_POUR_WEIGHT: 200,
+            Columns.COL_CAST_TYPE: "L",
+            Columns.COL_ALLOY: "A",
+            "Part Number": "P7",
+        })
+
+        expanded = Expand_Job(job)
+        self.assertEqual([row["EXT"] for row in expanded], ["B", "L"])
+        self.assertEqual([int(row["Molds for EXT"]) for row in expanded], [10, 4])
+
+        assigned = Assign_days(pd.DataFrame(expanded))
+        self.assertEqual(assigned["EXT"].tolist(), ["B", "B", "L", "L"])
+        self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2, 2, 3])
+        self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4, 2, 2])
+
 
 if __name__ == "__main__":
     unittest.main()
