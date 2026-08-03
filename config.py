@@ -20,6 +20,9 @@ class DailyMoldLimits:
 
 
 # DATABASE CONFIGURATION FOR ODBC CONNECTION
+# May not be using ODBC? 
+# Mixed authentication modes
+# 
 class DatabaseConfig:
     ODBC_DRIVER = "ODBC Driver 17 for SQL Server"
     SERVER = "your_server_name"
