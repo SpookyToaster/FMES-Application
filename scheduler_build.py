@@ -7,6 +7,10 @@ import pandas as pd
 from config import Columns, DailyMoldLimits
 
 
+EXTENSION_WEIGHT_LIMIT_LBS = 2300
+EXTENSION_MOLD_LIMIT = 10
+
+
 def _safe_int(value, default=0):
     try:
         if pd.isna(value):
@@ -44,26 +48,38 @@ def Get_daily_mold_limit(job):
     return 6
 
 
+def Get_extension_mold_limit(job):
+    pour_weight = float(job.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+
+    if pour_weight <= 0:
+        max_by_weight = EXTENSION_MOLD_LIMIT
+    else:
+        max_by_weight = int(EXTENSION_WEIGHT_LIMIT_LBS // pour_weight)
+        max_by_weight = max(max_by_weight, 1)
+
+    return min(max_by_weight, EXTENSION_MOLD_LIMIT)
+
+
 def Calculate_Splits(job):
     molds_needed = math.ceil(job[Columns.COL_MOLDS_NEEDED])
-    daily_limit = Get_daily_mold_limit(job)
-    return math.ceil(molds_needed / daily_limit)
+    extension_limit = Get_extension_mold_limit(job)
+    return math.ceil(molds_needed / extension_limit)
 
 
-def _build_remaining_extension_plan(total_molds, completed_molds, daily_limit):
+def _build_remaining_extension_plan(total_molds, completed_molds, extension_limit):
     total_molds = max(total_molds, 0)
     completed_molds = max(completed_molds, 0)
 
     if total_molds <= 0:
         return []
 
-    total_splits = math.ceil(total_molds / daily_limit)
+    total_splits = math.ceil(total_molds / extension_limit)
     extensions = get_extensions(total_splits)
 
     chunk_sizes = []
     molds_remaining = total_molds
     for _ in extensions:
-        chunk = min(daily_limit, molds_remaining)
+        chunk = min(extension_limit, molds_remaining)
         chunk_sizes.append(chunk)
         molds_remaining -= chunk
 
@@ -90,13 +106,13 @@ def Expand_Job(job):
     try:
         molds_needed = _safe_int(job[Columns.COL_MOLDS_NEEDED], default=0)
         molds_completed = _safe_int(job.get("Molds Completed", 0), default=0)
-        daily_limit = Get_daily_mold_limit(job)
+        extension_limit = Get_extension_mold_limit(job)
         total_molds = molds_needed + molds_completed
 
         extension_plan = _build_remaining_extension_plan(
             total_molds=total_molds,
             completed_molds=molds_completed,
-            daily_limit=daily_limit,
+            extension_limit=extension_limit,
         )
 
         rows = []
@@ -147,27 +163,30 @@ def Is_F_Job(job):
 
 def Assign_days(schedule_df):
     try:
-        schedule_df["Schedule Day"] = None
         day_usage = {}
         job_last_day = {}
-        part_usage = {}
+        job_usage = {}
+        allocated_rows = []
 
-        for index, row in schedule_df.iterrows():
-            molds = row["Molds for EXT"]
+        for _, row in schedule_df.iterrows():
+            molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
+            if molds_remaining <= 0:
+                continue
+
             bucket = "F" if Is_F_Job(row) else "L"
             job_num = row[Columns.COL_JOB_NUMBER]
-            part_num = row["Part Number"]
-            day = job_last_day.get(job_num, 0) + 1
+            day = job_last_day.get(job_num, 1)
+            per_job_daily_limit = Get_daily_mold_limit(row)
 
-            while True:
+            while molds_remaining > 0:
                 if day not in day_usage:
                     day_usage[day] = {"L": 0, "F": 0}
 
-                if day not in part_usage:
-                    part_usage[day] = {}
+                if day not in job_usage:
+                    job_usage[day] = {}
 
-                if part_num not in part_usage[day]:
-                    part_usage[day][part_num] = 0
+                if job_num not in job_usage[day]:
+                    job_usage[day][job_num] = {"L": 0, "F": 0}
 
                 capacity = (
                     DailyMoldLimits.MAX_F_MOLDS_PER_DAY
@@ -175,20 +194,32 @@ def Assign_days(schedule_df):
                     else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
                 )
 
-                if (
-                    day_usage[day][bucket] + molds <= capacity
-                    and part_usage[day][part_num] + molds <= 6
-                ):
-                    day_usage[day][bucket] += molds
-                    part_usage[day][part_num] += molds
-                    schedule_df.at[index, "Schedule Day"] = day
-                    job_last_day[job_num] = day
-                    break
+                available_day_capacity = capacity - day_usage[day][bucket]
+                available_job_capacity = per_job_daily_limit - job_usage[day][job_num][bucket]
+                molds_for_day = min(
+                    molds_remaining,
+                    available_day_capacity,
+                    available_job_capacity,
+                )
 
-                day += 1
+                if molds_for_day > 0:
+                    row_for_day = row.copy()
+                    row_for_day["Molds for EXT"] = molds_for_day
+                    pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+                    row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
+                    row_for_day["Schedule Day"] = day
+                    allocated_rows.append(row_for_day)
+
+                    day_usage[day][bucket] += molds_for_day
+                    job_usage[day][job_num][bucket] += molds_for_day
+                    job_last_day[job_num] = day
+                    molds_remaining -= molds_for_day
+
+                if molds_remaining > 0:
+                    day += 1
 
         print(day_usage)
-        return schedule_df
+        return pd.DataFrame(allocated_rows)
     except Exception as exc:
         raise RuntimeError("Failed while assigning schedule days") from exc
 

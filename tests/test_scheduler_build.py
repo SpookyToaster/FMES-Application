@@ -14,19 +14,21 @@ class SchedulerBuildTests(unittest.TestCase):
     def test_get_extensions_and_expand_job(self):
         job = pd.Series({
             Columns.COL_JOB_NUMBER: "3001",
-            Columns.COL_MOLDS_NEEDED: 7,
-            Columns.COL_POUR_WEIGHT: 100,
+            Columns.COL_MOLDS_NEEDED: 24,
+            Columns.COL_POUR_WEIGHT: 200,
             Columns.COL_CAST_TYPE: "L",
             Columns.COL_ALLOY: "A",
         })
 
         self.assertEqual(get_extensions(1), [""])
-        self.assertEqual(Calculate_Splits(job), 2)
+        self.assertEqual(Calculate_Splits(job), 3)
 
         expanded = Expand_Job(job)
-        self.assertEqual(len(expanded), 2)
+        self.assertEqual(len(expanded), 3)
         self.assertEqual(expanded[0]["EXT"], "A")
+        self.assertEqual(expanded[1]["EXT"], "B")
         self.assertEqual(expanded[-1]["EXT"], "L")
+        self.assertEqual([row["Molds for EXT"] for row in expanded], [10, 10, 4])
 
     def test_assign_days_and_daily_schedules(self):
         schedule_rows = Build_Schedule_Rows([
@@ -60,9 +62,9 @@ class SchedulerBuildTests(unittest.TestCase):
     def test_expand_job_preserves_remaining_extensions_after_partial_completion(self):
         job = pd.Series({
             Columns.COL_JOB_NUMBER: "5001",
-            Columns.COL_MOLDS_NEEDED: 12,
-            "Molds Completed": 6,
-            Columns.COL_POUR_WEIGHT: 100,
+            Columns.COL_MOLDS_NEEDED: 14,
+            "Molds Completed": 10,
+            Columns.COL_POUR_WEIGHT: 200,
             Columns.COL_CAST_TYPE: "L",
             Columns.COL_ALLOY: "A",
         })
@@ -70,7 +72,27 @@ class SchedulerBuildTests(unittest.TestCase):
         expanded = Expand_Job(job)
 
         self.assertEqual([row["EXT"] for row in expanded], ["B", "L"])
-        self.assertEqual([row["Molds for EXT"] for row in expanded], [6, 6])
+        self.assertEqual([row["Molds for EXT"] for row in expanded], [10, 4])
+
+    def test_assign_days_splits_extension_across_days(self):
+        schedule_df = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "6001",
+                Columns.COL_POUR_WEIGHT: 150,
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_ALLOY: "A",
+                "Part Number": "P1",
+                "EXT": "A",
+                "Extension_Seq": 0,
+                "Molds for EXT": 10,
+                "Total Weight per EXT": 1500,
+            }
+        ])
+
+        assigned = Assign_days(schedule_df)
+        self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
+        self.assertEqual(assigned["EXT"].tolist(), ["A", "A"])
+        self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4])
 
 
 if __name__ == "__main__":

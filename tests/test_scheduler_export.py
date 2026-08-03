@@ -1,9 +1,11 @@
 import sys
+from datetime import datetime
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from openpyxl import load_workbook
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -44,7 +46,7 @@ class SchedulerExportTests(unittest.TestCase):
     def test_export_mold_schedule_writes_file(self):
         frame = pd.DataFrame([
             {
-                Columns.COL_DUE_DATE: "2026-08-04",
+                Columns.COL_DUE_DATE: "2026-08-04 00:00:00",
                 "Customer Name": "Customer",
                 "Part Number": "P1",
                 Columns.COL_JOB_NUMBER: "5001",
@@ -73,6 +75,14 @@ class SchedulerExportTests(unittest.TestCase):
             output_file = Path(temp_dir) / "mold_schedule.xlsx"
             Export_Mold_Schedule(export_blocks, str(output_file))
             self.assertTrue(output_file.exists())
+
+            wb = load_workbook(output_file)
+            ws = wb["Mold Schedule"]
+            due_date_cell = ws.cell(4, 1)
+            self.assertIsInstance(due_date_cell.value, datetime)
+            self.assertEqual(due_date_cell.value.date().isoformat(), "2026-08-04")
+            self.assertEqual(due_date_cell.value.time().isoformat(), "00:00:00")
+            self.assertEqual(due_date_cell.number_format, "m/d/yyyy")
 
     def test_export_mold_schedule_wraps_save_failures(self):
         export_blocks = {

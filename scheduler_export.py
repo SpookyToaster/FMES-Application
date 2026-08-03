@@ -1,7 +1,19 @@
 from openpyxl import Workbook
 from openpyxl.styles import Border, Font, Side
+import pandas as pd
 
 from config import Columns
+
+
+def _normalize_due_date(value):
+    if pd.isna(value):
+        return ""
+
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return value
+
+    return parsed.date()
 
 
 def Build_Daily_Export_Blocks(Daily_Schedules, Day_Dates):
@@ -80,7 +92,7 @@ def Build_Excel_Rows(export_blocks):
 
         for _, row in block["rows"].iterrows():
             excel_rows.append([
-                row.get(Columns.COL_DUE_DATE, ""),
+                _normalize_due_date(row.get(Columns.COL_DUE_DATE, "")),
                 row.get("Customer Name", ""),
                 row.get("Part Number", ""),
                 row.get(Columns.COL_JOB_NUMBER, ""),
@@ -146,7 +158,7 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
 
             for _, row in block["rows"].iterrows():
                 values = [
-                    row.get(Columns.COL_DUE_DATE, ""),
+                    _normalize_due_date(row.get(Columns.COL_DUE_DATE, "")),
                     row.get("Customer Name", ""),
                     row.get("Part Number", ""),
                     row.get(Columns.COL_JOB_NUMBER, ""),
@@ -163,6 +175,8 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
                 for col_num, value in enumerate(values, start=1):
                     cell = ws.cell(current_row, col_num, value)
                     cell.border = thin
+                    if col_num == 1 and value != "":
+                        cell.number_format = "m/d/yyyy"
 
                 current_row += 1
 
