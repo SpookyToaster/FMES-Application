@@ -1,3 +1,12 @@
+"""
+Export logic for the mold production scheduler.
+
+Builds structured export blocks from daily schedules and writes two output
+workbooks:
+  Mold Schedule.xlsx  – per-day tables with job details, extension sizes, and heat numbers.
+  Heat Summary.xlsx   – per-heat totals (Sheet 1) and per-day aggregate totals (Sheet 2).
+"""
+
 from openpyxl import Workbook
 from openpyxl.styles import Border, Font, Side
 import pandas as pd
@@ -6,6 +15,7 @@ from config import Columns
 
 
 def _normalize_due_date(value):
+    """Return a date object from value, an empty string for NaN, or the raw value if unparseable."""
     if pd.isna(value):
         return ""
 
@@ -17,6 +27,17 @@ def _normalize_due_date(value):
 
 
 def Build_Daily_Export_Blocks(Daily_Schedules, Day_Dates):
+    """
+    Combine daily schedule DataFrames with their calendar dates into export blocks.
+
+    Each block contains the subset of columns written to Excel plus pre-computed
+    weight and mold totals used for the TOTALS row.
+
+    Returns:
+        dict mapping day number (int) -> {
+            'date', 'weekday', 'rows' (DataFrame), 'weight_total', 'mold_total'
+        }
+    """
     try:
         export_blocks = {}
 
@@ -58,6 +79,7 @@ def Build_Daily_Export_Blocks(Daily_Schedules, Day_Dates):
 
 
 def Print_Export_Blocks(export_blocks):
+    """Print a formatted console preview of all export blocks."""
     try:
         for day in export_blocks:
             print("\n" + "=" * 50)
@@ -75,6 +97,15 @@ def Print_Export_Blocks(export_blocks):
 
 
 def Build_Excel_Rows(export_blocks):
+    """
+    Flatten export_blocks into a list of row lists for simple sequential writing.
+
+    Each day contributes: a header row, a column-label row, data rows, a TOTALS
+    row, and one blank spacer row.
+
+    Returns:
+        list of lists – each inner list represents one Excel row.
+    """
     excel_rows = []
 
     for day in sorted(export_blocks.keys()):
@@ -120,6 +151,16 @@ def Build_Excel_Rows(export_blocks):
 
 
 def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
+    """
+    Write the mold schedule to an Excel workbook.
+
+    Each production day occupies its own block of rows separated by two blank
+    rows.  Column widths, bold headers, and thin borders are applied.
+
+    Args:
+        Export_Blocks: Output of Build_Daily_Export_Blocks.
+        output_file:   Destination path for the workbook.
+    """
     try:
         wb = Workbook()
         ws = wb.active
@@ -210,6 +251,13 @@ def Export_Mold_Schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
 
 
 def Build_Heat_Summary_Rows(export_blocks):
+    """
+    Aggregate export block rows into one summary row per heat per day.
+
+    Returns:
+        list of dicts with keys: Schedule Date, Weekday, Heat #, Alloy,
+        Total Weight (lbs), Total Molds, Rows in Heat.
+    """
     summary_rows = []
 
     for day in sorted(export_blocks.keys()):
@@ -255,6 +303,13 @@ def Build_Heat_Summary_Rows(export_blocks):
 
 
 def Build_Heat_Daily_Totals_Rows(summary_rows):
+    """
+    Roll up heat summary rows to one row per production day.
+
+    Returns:
+        list of dicts with keys: Schedule Date, Weekday, Total Heats,
+        Total Weight (lbs), Total Molds.
+    """
     if not summary_rows:
         return []
 
@@ -286,6 +341,16 @@ def Build_Heat_Daily_Totals_Rows(summary_rows):
 
 
 def Export_Heat_Summary(export_blocks, output_file="Heat Summary.xlsx"):
+    """
+    Write the heat summary workbook with two sheets.
+
+    Sheet 1 "Heat Summary"       – one row per heat per day.
+    Sheet 2 "Daily Heat Totals"  – one row per day with aggregate counts.
+
+    Args:
+        export_blocks: Output of Build_Daily_Export_Blocks.
+        output_file:   Destination path for the workbook.
+    """
     try:
         wb = Workbook()
         ws = wb.active

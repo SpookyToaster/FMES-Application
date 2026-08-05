@@ -1,3 +1,15 @@
+"""
+Schedule-building logic for the mold production scheduler.
+
+Responsibilities:
+  - Split individual jobs into extension-sized work chunks (Expand_Job).
+  - Assign each chunk to a numbered production day while respecting
+    per-day and per-job mold capacity limits (Assign_days).
+  - Attach calendar dates to day numbers, skipping weekends (Build_Schedule_Dates).
+  - Assign heat numbers within each day based on alloy changes and
+    the 2,300-lb heat weight limit (Build_Daily_Schedules).
+"""
+
 import math
 import string
 from datetime import timedelta
@@ -13,6 +25,7 @@ HEAT_WEIGHT_LIMIT_LBS = 2300
 
 
 def _safe_int(value, default=0):
+    """Convert value to int via ceiling, returning default on NaN or conversion error."""
     try:
         if pd.isna(value):
             return default
@@ -22,6 +35,16 @@ def _safe_int(value, default=0):
 
 
 def get_extensions(num_splits):
+    """
+    Generate extension labels for a job split into num_splits chunks.
+
+    A single-chunk job has no label ("").  Multi-chunk jobs get alphabetical
+    labels (A, B, C …) with the final chunk labeled "L" (Last).
+
+    Examples:
+        get_extensions(1) -> [""]
+        get_extensions(3) -> ["A", "B", "L"]
+    """
     if num_splits == 1:
         return [""]
 
@@ -36,6 +59,12 @@ def get_extensions(num_splits):
 
 
 def Get_daily_mold_limit(job):
+    """
+    Return the maximum molds this job may contribute to a single production day.
+
+    Floor jobs (casting type F) and heavy jobs (pour weight > 300 lbs) are
+    limited to 3 molds per day.  All other line jobs are limited to 6.
+    """
     pour_weight = job[Columns.COL_POUR_WEIGHT]
 
     if pour_weight > 300:
@@ -50,6 +79,13 @@ def Get_daily_mold_limit(job):
 
 
 def Get_extension_mold_limit(job):
+    """
+    Return the maximum molds allowed in a single extension for this job.
+
+    Calculated as the lesser of EXTENSION_MOLD_LIMIT (10) and the number of
+    molds whose combined pour weight fits within EXTENSION_WEIGHT_LIMIT_LBS
+    (2,300 lbs).  Always at least 1.
+    """
     pour_weight = float(job.get(Columns.COL_POUR_WEIGHT, 0) or 0)
 
     if pour_weight <= 0:
@@ -62,12 +98,23 @@ def Get_extension_mold_limit(job):
 
 
 def Calculate_Splits(job):
+    """Return the number of extensions required to schedule all remaining molds for a job."""
     molds_needed = math.ceil(job[Columns.COL_MOLDS_NEEDED])
     extension_limit = Get_extension_mold_limit(job)
     return math.ceil(molds_needed / extension_limit)
 
 
 def _build_remaining_extension_plan(total_molds, completed_molds, extension_limit):
+    """
+    Build the list of extensions still needed after accounting for completed molds.
+
+    The full job is divided into extension-sized chunks labeled by get_extensions().
+    Any chunk that is already fully covered by completed_molds is skipped.  The
+    first partially completed chunk is trimmed to its remaining count.
+
+    Returns:
+        list of (seq, ext_label, molds_remaining) tuples.
+    """
     total_molds = max(total_molds, 0)
     completed_molds = max(completed_molds, 0)
 
@@ -104,6 +151,18 @@ def _build_remaining_extension_plan(total_molds, completed_molds, extension_limi
 
 
 def Expand_Job(job):
+    """
+    Expand a single job into one or more extension rows ready for day assignment.
+
+    Each returned row is a copy of the original job dict augmented with:
+      EXT               – extension label ("", "A", "B", … "L")
+      Extension_Seq     – zero-based ordinal position of this extension
+      Molds for EXT     – mold count assigned to this extension
+      Total Weight per EXT – combined pour weight for this extension
+
+    Raises:
+        RuntimeError: Wraps any unexpected exception with the job number.
+    """
     try:
         molds_needed = _safe_int(job[Columns.COL_MOLDS_NEEDED], default=0)
         molds_completed = _safe_int(job.get("Molds Completed", 0), default=0)
@@ -144,6 +203,15 @@ def Expand_Job(job):
 
 
 def Build_Schedule_Rows(jobs_to_schedule):
+    """
+    Expand every job in jobs_to_schedule into extension rows.
+
+    Args:
+        jobs_to_schedule: Iterable of job dicts (one per row from the filtered DataFrame).
+
+    Returns:
+        list of dicts – all extension rows for all jobs combined.
+    """
     try:
         schedule_rows = []
 
@@ -156,6 +224,7 @@ def Build_Schedule_Rows(jobs_to_schedule):
 
 
 def Is_F_Job(job):
+    """Return True if the job belongs in the floor (F) mold bucket."""
     if job[Columns.COL_POUR_WEIGHT] > 300:
         return True
 
@@ -163,6 +232,19 @@ def Is_F_Job(job):
 
 
 def Assign_days(schedule_df):
+    """
+    Assign each extension row to a numbered production day.
+
+    Iterates rows in their sorted order and greedily fills the current day.
+    When a day is full (either the global bucket cap or the per-job daily cap
+    is reached) the algorithm advances to the next day.  A single extension
+    may be split across multiple days.
+
+    Adds a 'Schedule Day' column (1-based int) to each allocated row.
+
+    Returns:
+        DataFrame of allocated rows with 'Schedule Day' populated.
+    """
     try:
         day_usage = {}
         job_last_day = {}
@@ -226,6 +308,7 @@ def Assign_days(schedule_df):
 
 
 def print_bucket(Schedule_Data_Frame):
+    """Print a per-day summary of L and F mold counts versus daily limits."""
     for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):
         day_rows = Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
         l_molds = day_rows[~day_rows.apply(Is_F_Job, axis=1)]["Molds for EXT"].sum()
@@ -239,6 +322,16 @@ def print_bucket(Schedule_Data_Frame):
 
 
 def Build_Daily_Schedules(Schedule_Data_Frame):
+    """
+    Group the allocated schedule by day and assign heat numbers within each day.
+
+    Rows within a day are sorted by alloy then job number.  A new heat starts
+    whenever the alloy changes or adding the next row's weight would exceed
+    HEAT_WEIGHT_LIMIT_LBS (2,300 lbs).
+
+    Returns:
+        dict mapping day number (int) -> DataFrame with a 'Heat #' column added.
+    """
     try:
         def assign_heat_numbers(day_df):
             if day_df.empty:
@@ -290,6 +383,16 @@ def Build_Daily_Schedules(Schedule_Data_Frame):
 
 
 def Build_Schedule_Dates(daily_schedules, start_date):
+    """
+    Map each schedule day number to a real calendar date, skipping weekends.
+
+    Args:
+        daily_schedules: Dict keyed by day number (output of Build_Daily_Schedules).
+        start_date:      datetime for the first production day (typically tomorrow).
+
+    Returns:
+        dict mapping day number -> {'date': date, 'weekday': weekday name string}.
+    """
     try:
         day_dates = {}
         current_date = start_date

@@ -1,3 +1,20 @@
+"""
+Job filtering logic for the mold production scheduler.
+
+Filters the raw Open Order Report down to only the jobs that should be
+scheduled for mold production on the upcoming days.
+
+Exclusion rules (applied in order):
+  - Blank job number
+  - Hold flag = YES
+  - Job type in [IFA, IFC]  (investment/flask jobs, not mold-poured)
+  - Casting type = I        (investment casting)
+  - Molds Needed <= 0
+
+The module-level filtered_job_counts dict accumulates counts across calls
+for diagnostic reporting.
+"""
+
 import pandas as pd
 
 from config import Columns
@@ -15,6 +32,18 @@ filtered_job_counts = {
 
 
 def Mold_Scheduler(ReadyToMold):
+    """
+    Filter a DataFrame of open orders down to jobs eligible for mold scheduling.
+
+    Args:
+        ReadyToMold: pandas DataFrame from the Open Order Report (sheet 'OOR').
+
+    Returns:
+        list of Series – one entry per job row that passed all filters.
+
+    Raises:
+        RuntimeError: Wraps any unexpected exception.
+    """
     try:
         jobs_to_schedule = []
 
@@ -48,6 +77,7 @@ def Mold_Scheduler(ReadyToMold):
 
 
 def jobs_to_schedule_test(jobs_to_schedule):
+    """Print a diagnostic list of jobs selected for scheduling."""
     print("\nJobs selected for scheduling:")
 
     for job in jobs_to_schedule:
@@ -61,6 +91,7 @@ def jobs_to_schedule_test(jobs_to_schedule):
 
 
 def scheduled_rows_test(schedule_rows):
+    """Print a diagnostic list of expanded extension rows."""
     for row in schedule_rows:
         print(
             f"{row[Columns.COL_JOB_NUMBER]}"

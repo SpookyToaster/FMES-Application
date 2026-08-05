@@ -1,3 +1,20 @@
+"""
+Historical snapshot loader for the mold production scheduler.
+
+Reads a combined ERP export CSV and loads it into the SQL Server history
+tables used for reporting and trend analysis.
+
+Pipeline (run in a single transaction):
+  1. Insert a SchedulerRun row to record the load event.
+  2. Bulk-insert all CSV rows as raw text into dbo.OrderSnapshotRaw.
+  3. (Unless --skip-transform) Execute stored procedures to:
+       a. Transform raw text into typed columns (dbo.TransformOrderSnapshotRaw).
+       b. Upsert typed rows into the lifecycle table (dbo.UpsertOrderLifecycleFromRun).
+
+Usage:
+    python load_historical_snapshot.py --csv <path> [--run-date YYYY-MM-DD]
+"""
+
 import argparse
 from datetime import date, datetime
 
@@ -29,6 +46,7 @@ REQUIRED_COLUMNS = [
 
 
 def parse_args():
+    """Parse command-line arguments and return the parsed namespace."""
     parser = argparse.ArgumentParser(
         description="Load daily ERP export snapshot into SQL Server history tables."
     )
@@ -56,6 +74,7 @@ def parse_args():
 
 
 def validate_columns(frame):
+    """Raise RuntimeError if any required column is absent from the DataFrame."""
     missing = [col for col in REQUIRED_COLUMNS if col not in frame.columns]
     if missing:
         raise RuntimeError(
@@ -65,6 +84,7 @@ def validate_columns(frame):
 
 
 def parse_run_date(run_date_text):
+    """Parse a YYYY-MM-DD string into a date object, raising RuntimeError on bad input."""
     try:
         return datetime.strptime(run_date_text, "%Y-%m-%d").date()
     except ValueError as exc:
@@ -74,6 +94,12 @@ def parse_run_date(run_date_text):
 
 
 def insert_scheduler_run(cursor, run_date, source_name, row_count):
+    """
+    Insert a row into dbo.SchedulerRun and return the generated RunId.
+
+    Raises:
+        RuntimeError: If SCOPE_IDENTITY() returns no result after the insert.
+    """
     cursor.execute(
         """
         INSERT INTO dbo.SchedulerRun (RunDate, SourceName, RowCount)
@@ -91,12 +117,20 @@ def insert_scheduler_run(cursor, run_date, source_name, row_count):
 
 
 def to_text(value):
+    """Convert a DataFrame cell value to a stripped string, or None for NaN."""
     if pd.isna(value):
         return None
     return str(value).strip()
 
 
 def insert_raw_snapshot_rows(cursor, run_id, frame):
+    """
+    Bulk-insert all rows from frame into dbo.OrderSnapshotRaw as raw text.
+
+    Uses fast_executemany for performance.  Every cell value is converted to
+    a stripped string via to_text() so the raw table preserves the original
+    ERP export fidelity before any type conversions are applied.
+    """
     insert_sql = """
         INSERT INTO dbo.OrderSnapshotRaw (
             RunId,

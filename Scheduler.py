@@ -1,3 +1,17 @@
+"""
+Mold production scheduler entry point.
+
+Orchestrates the full scheduling pipeline:
+  1. Read the Open Order Report from Excel.
+  2. Filter jobs eligible for mold scheduling.
+  3. Expand jobs into extension-sized work chunks.
+  4. Assign each chunk to a production day respecting daily mold capacity.
+  5. Attach calendar dates (skipping weekends) and heat numbers.
+  6. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
+
+Run directly (python Scheduler.py) or import Schedule_Molds() for testing.
+"""
+
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -23,6 +37,16 @@ from scheduler_io import Read_File
 
 
 def Schedule_Molds():
+    """
+    Run the complete mold scheduling pipeline and return export blocks.
+
+    Returns:
+        dict: Keyed by schedule day (int). Each value contains:
+              'date', 'weekday', 'rows' (DataFrame), 'weight_total', 'mold_total'.
+
+    Raises:
+        RuntimeError: If any pipeline stage fails.
+    """
     try:
         input_file = Read_File()
         jobs_to_schedule = Mold_Scheduler(input_file)
