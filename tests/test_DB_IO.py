@@ -5,7 +5,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from Database import validate_database_environment
-from DB_IO import list_tables
+from DB_IO import list_columns, list_tables
 
 
 class DBIOIntegrationTests(unittest.TestCase):
@@ -30,6 +30,21 @@ class DBIOIntegrationTests(unittest.TestCase):
 		for table in tables:
 			print(f"- {table['schema']}.{table['name']} ({table['type']})")
 
+		# Iterate through the tables and print the first 10 columns for each table
+		# then look for matching columns in main and orders reports
+		for table in tables:
+			table_name = table["name"]
+			columns = list_columns(table_name, schema="dbo")
+
+			self.assertIsInstance(columns, list)
+			self.assertGreater(len(columns), 0, f"No columns found for table {table_name}.")
+
+			print(f"\nColumns for dbo.{table_name}:")
+			for column in columns[:10]:
+				print(
+					f"- {column['ordinal']}: {column['name']} "
+					f"({column['type']}, nullable={column['nullable']})"
+				)
 
 if __name__ == "__main__":
 	unittest.main()
