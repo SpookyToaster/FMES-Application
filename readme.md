@@ -20,11 +20,13 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Modular refactor of mold scheduling logic into dedicated modules
 - Merge conflict cleanup and stable orchestration entrypoint
 - Unit and integration test coverage for scheduling boundaries
+- SQL scheduler input validation updated to allow blank Alloy while keeping strict required checks for key fields
 - Local credential hardening using environment variables
 - Startup environment validation utility for DB configuration
 - SQL Server historical snapshot load pipeline with transform/upsert support
 - DB metadata/query helpers in [DB_IO.py](DB_IO.py) for table and column discovery
 - Callable dashboard query methods in [DB_IO.py](DB_IO.py) for Orders and Main report datasets
+- Main dashboard SQL mapping aligned to direct-source policy for molds/cores/pour fields (no cross-field derivations)
 - Production SQL report script in [Production_Report_Queries.sql](Production_Report_Queries.sql)
 
 ### In Progress
@@ -117,6 +119,7 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Supports SQL metadata discovery directly from Python through [DB_IO.py](DB_IO.py).
 - Supports callable Orders dashboard extraction from OE header/detail tables.
 - Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run.
+- Uses direct-source values for mold/core/pour outputs in Main dashboard extraction; derived formulas are intentionally excluded so manual Excel calculations stay authoritative.
 - Supports operational SQL execution from [Production_Report_Queries.sql](Production_Report_Queries.sql) for direct SSMS usage.
 
 ### Open Order Report Sync Workflow
@@ -197,6 +200,20 @@ The current suite covers:
 - job expansion and day assignment
 - export block generation and workbook writing
 - end-to-end orchestration
+
+Latest focused verification pass: 31 tests passing after scheduler IO and DB query updates.
+
+---
+
+## Build / Packaging
+
+Build the executable from the project root with:
+
+```powershell
+.venv\Scripts\python.exe -m PyInstaller Scheduler.spec --noconfirm --clean --workpath "build_$(Get-Date -Format yyyyMMdd_HHmmss)" --distpath "dist_$(Get-Date -Format yyyyMMdd_HHmmss)"
+```
+
+This timestamped `--workpath` and `--distpath` pattern avoids Windows/OneDrive file lock collisions in reused `build` folders.
 
 ---
 

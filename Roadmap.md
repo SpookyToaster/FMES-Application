@@ -38,17 +38,20 @@ Production conditions will change daily. The system should adapt rather than att
 - Mold scheduling pipeline refactored into modular files
 - Orchestration flow stabilized in [Scheduler.py](Scheduler.py)
 - Boundary test suite added for IO, filtering, building, export, integration, and DB environment checks
+- SQL scheduler input validation adjusted to allow blank Alloy while maintaining strict required-field checks for critical scheduling columns
 - Credential handling moved to local environment variables
 - DB startup environment validator added in [check_db_env.py](check_db_env.py)
 - Historical snapshot SQL schema and loader pipeline implemented ([HistoricalReporting_ERP_Exact.sql](HistoricalReporting_ERP_Exact.sql), [load_historical_snapshot.py](load_historical_snapshot.py))
 - DB metadata discovery and dashboard data access methods implemented in [DB_IO.py](DB_IO.py)
 - Production-ready dashboard SQL query pack added in [Production_Report_Queries.sql](Production_Report_Queries.sql)
+- Main dashboard SQL mapping aligned to direct-source output policy for molds/cores/pour fields (manual derivations remain in Excel workflow)
 
 ### In Progress
 
 - DB report read layer is implemented; application-level orchestration of automated dashboard refresh/export is still in progress
 - Error handling is present across scheduling and DB entrypoints, with room for centralized logging
 - Schedule persistence model is still not in use for run-to-run carryforward
+- Build and release process hardening is in progress (timestamped PyInstaller work/dist paths to avoid Windows lock conflicts)
 
 ### Open Gaps
 
@@ -228,4 +231,4 @@ LastModified
 
 1. Add SQL Server schedule run-state tables and write path for each scheduler execution.
 2. Preserve prior run assignments to reduce schedule churn between runs.
-3. Wire [DB_IO.py](DB_IO.py) dashboard methods into scheduled exports/distribution and add structured logging for DB and pipeline stages.
+3. Wire [DB_IO.py](DB_IO.py) dashboard methods into scheduled exports/distribution, add structured logging, and formalize repeatable packaging steps.
