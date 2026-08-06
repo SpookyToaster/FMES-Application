@@ -9,7 +9,7 @@
 
 Production Scheduler is a Python-based mold scheduling tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports a formatted mold schedule workbook.
 
-The program now uses a modular layout instead of a single monolithic script. [Scheduler.py](Scheduler.py) is the orchestration entrypoint, while the core work lives in dedicated modules for input, filtering, schedule building, and export.
+The program now uses a modular layout instead of a single monolithic script. [Main.py](Main.py) is the operational entrypoint, while [Scheduler.py](Scheduler.py) provides orchestration logic and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
 ---
 
@@ -48,7 +48,8 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 
 ### Orchestration
 
-- [Scheduler.py](Scheduler.py) coordinates the full scheduling pipeline.
+- [Main.py](Main.py) is the canonical executable entrypoint for DB/Excel input through export.
+- [Scheduler.py](Scheduler.py) coordinates the schedule-building pipeline as a library module.
 - It loads input, filters jobs, builds schedule rows, assigns days, groups by day, prints summaries, and exports the final workbook.
 
 ### Module Boundaries

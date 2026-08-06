@@ -9,7 +9,7 @@ Orchestrates the full scheduling pipeline:
   5. Attach calendar dates (skipping weekends) and heat numbers.
   6. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
 
-Run directly (python Scheduler.py) or import Schedule_Molds() for testing.
+Import Schedule_Molds() from Main.py or tests.
 """
 
 from datetime import datetime, timedelta
@@ -28,8 +28,6 @@ from scheduler_build import (
 
 from scheduler_export import (
     Build_Daily_Export_Blocks,
-    Export_Heat_Summary,
-    Export_Mold_Schedule,
     Print_Export_Blocks,
 )
 
@@ -123,19 +121,3 @@ def Schedule_Molds():
     except Exception as exc:
         raise RuntimeError("Schedule_Molds failed during orchestration") from exc
 
-
-if __name__ == "__main__":
-    export_blocks = Schedule_Molds()
-
-    output_file = (
-        r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-        r"\Quality\Schedule\Output\Mold Schedule.xlsx"
-    )
-
-    heat_summary_output_file = (
-        r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-        r"\Quality\Schedule\Output\Heat Summary.xlsx"
-    )
-
-    Export_Mold_Schedule(export_blocks, output_file)
-    Export_Heat_Summary(export_blocks, heat_summary_output_file)
