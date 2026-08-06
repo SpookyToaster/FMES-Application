@@ -56,10 +56,26 @@ SQL_MAIN_EXPORT_COLUMNS = [
     "Molds Completed",
 ]
 
+EXCLUDED_CUSTOMER_NAMES = {"MONETT"}
+
 
 def _ensure_directory(path):
     """Create path (and parents) when missing."""
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def _exclude_rows_by_customer_name(rows, excluded_names=EXCLUDED_CUSTOMER_NAMES):
+    """Return rows excluding records whose Customer Name matches excluded_names."""
+    normalized_exclusions = {str(name).strip().upper() for name in excluded_names}
+
+    filtered = []
+    for row in rows:
+        customer_name = str(row.get("Customer Name", "")).strip().upper()
+        if customer_name in normalized_exclusions:
+            continue
+        filtered.append(row)
+
+    return filtered
 
 
 def _to_plain_text(value):
@@ -202,6 +218,7 @@ def Sync_Open_Order_Report_With_SQL(
         start_due_date=start_due_date,
         end_due_date=end_due_date,
     )
+    sql_rows = _exclude_rows_by_customer_name(sql_rows)
 
     _write_sql_data_to_oor(source_path, sql_rows, sheet_name="OOR")
 
@@ -317,6 +334,7 @@ def Read_File(
                 start_due_date=start_due_date,
                 end_due_date=end_due_date,
             )
+            raw_rows = _exclude_rows_by_customer_name(raw_rows)
             return _normalize_sql_rows(raw_rows)
 
         raise RuntimeError(f"Unsupported input source '{source}'. Use 'excel' or 'sql'.")

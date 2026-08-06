@@ -60,6 +60,44 @@ class SchedulerIOTests(unittest.TestCase):
 
         self.assertIn("Failed to read schedule input from SQL", str(context.exception))
 
+    def test_read_file_sql_excludes_monett_customer_rows(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Monett",
+                "Part Number": "P-MON",
+                "Job Type": "JOB",
+                "Job Number": "M-1",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "Quantity of Molds": 10,
+                "Molds Completed": 0,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Pour Weight": 100,
+            },
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer B",
+                "Part Number": "P-OK",
+                "Job Type": "JOB",
+                "Job Number": "B-1",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "Quantity of Molds": 8,
+                "Molds Completed": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Pour Weight": 90,
+            },
+        ]
+
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+            frame = Read_File(source="sql")
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["Customer Name"], "Customer B")
+
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -80,6 +118,25 @@ class SchedulerIOTests(unittest.TestCase):
             workbook.save(source_path)
 
             sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Monett",
+                    "Part Number": "P-MON",
+                    "Job Type": "JOB",
+                    "Job Number": "M-1",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 3,
+                    "Quantity of Molds": 3,
+                    "Castings Per Mold": 1,
+                    "Quantity of Cores": 0,
+                    "Pour Weight": 60,
+                    "Total Pour WT": 180,
+                    "Total Value": 100,
+                    "Heat No Assigned": "HM",
+                    "Castings Produced": 0,
+                    "Molds Completed": 0,
+                },
                 {
                     "Due Date": "2026-08-04",
                     "Customer Name": "Customer A",
@@ -117,6 +174,7 @@ class SchedulerIOTests(unittest.TestCase):
             synced_wb = load_workbook(source_path)
             synced_ws = synced_wb["OOR"]
             self.assertEqual(synced_ws.cell(row=2, column=6).value, "2026-08-04")
+            self.assertEqual(synced_ws.cell(row=2, column=7).value, "Customer A")
             self.assertEqual(synced_ws.cell(row=2, column=22).value, "1")
             self.assertIsNone(synced_ws.cell(row=3, column=6).value)
             synced_wb.close()
