@@ -8,6 +8,9 @@ exported from the ERP system and placed in the shared OneDrive folder.
 from datetime import datetime
 from pathlib import Path
 import shutil
+import tempfile
+import zipfile
+from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
 import pandas as pd
@@ -57,6 +60,16 @@ SQL_MAIN_EXPORT_COLUMNS = [
 ]
 
 EXCLUDED_CUSTOMER_NAMES = {"MONETT"}
+XML_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+REQUIRED_SQL_TEXT_COLUMNS = [
+    "Due Date",
+    "Customer Name",
+    "Part Number",
+    "Job Number",
+    "Alloy",
+]
 
 
 def _ensure_directory(path):
@@ -76,6 +89,56 @@ def _exclude_rows_by_customer_name(rows, excluded_names=EXCLUDED_CUSTOMER_NAMES)
         filtered.append(row)
 
     return filtered
+
+
+def _validate_sql_rows(rows):
+    """
+    Validate that SQL rows are complete enough for overwrite and scheduling.
+
+    Raises RuntimeError with a concise defect summary when required fields are
+    missing so bad joins/mappings do not silently create invalid schedules.
+    """
+    if not rows:
+        raise RuntimeError(
+            "SQL scheduler input validation failed. No rows were returned after SQL join/mapping. "
+            "No matching Job Number keys were found between the source datasets."
+        )
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return rows
+
+    issues = []
+    for column_name in REQUIRED_SQL_TEXT_COLUMNS:
+        if column_name not in frame.columns:
+            issues.append(f"missing column: {column_name}")
+            continue
+
+        series = frame[column_name]
+        invalid_mask = series.isna() | (series.astype(str).str.strip() == "")
+        invalid_count = int(invalid_mask.sum())
+        if invalid_count:
+            sample_jobs = []
+            if "Job Number" in frame.columns:
+                sample_jobs = (
+                    frame.loc[invalid_mask, "Job Number"]
+                    .astype(str)
+                    .head(5)
+                    .tolist()
+                )
+            issues.append(
+                f"{column_name}: {invalid_count} blank rows"
+                + (f" (sample jobs: {', '.join(sample_jobs)})" if sample_jobs else "")
+            )
+
+    if issues:
+        raise RuntimeError(
+            "SQL scheduler input validation failed. The live query is returning incomplete rows: "
+            + "; ".join(issues)
+            + ". Provide the Power Query relationship/join logic so the SQL source can be mapped correctly."
+        )
+
+    return rows
 
 
 def _to_plain_text(value):
@@ -99,6 +162,115 @@ def _next_incremented_path(directory, stem, suffix=".xlsx"):
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _excel_column_letter(column_index):
+    """Return Excel column letters for a 1-based column index."""
+    letters = []
+    while column_index > 0:
+        column_index, remainder = divmod(column_index - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
+
+
+def _excel_column_index(column_letters):
+    """Return 1-based numeric column index for Excel column letters."""
+    value = 0
+    for char in column_letters:
+        value = (value * 26) + (ord(char.upper()) - 64)
+    return value
+
+
+def _sheet_cell_reference(row_index, column_index):
+    """Return Excel-style cell reference like F2."""
+    return f"{_excel_column_letter(column_index)}{row_index}"
+
+
+def _cell_column_index(cell_reference):
+    """Extract numeric column index from an Excel cell reference."""
+    letters = "".join(char for char in cell_reference if char.isalpha())
+    return _excel_column_index(letters)
+
+
+def _resolve_sheet_archive_path(zip_file, sheet_name):
+    """Resolve workbook sheet name to xl/worksheets/... archive path."""
+    workbook_root = ET.fromstring(zip_file.read("xl/workbook.xml"))
+    relationships_root = ET.fromstring(zip_file.read("xl/_rels/workbook.xml.rels"))
+
+    relationship_id = None
+    for sheet in workbook_root.findall(f"{{{XML_NS}}}sheets/{{{XML_NS}}}sheet"):
+        if sheet.get("name") == sheet_name:
+            relationship_id = sheet.get(f"{{{REL_NS}}}id")
+            break
+
+    if not relationship_id:
+        raise RuntimeError(f"Worksheet '{sheet_name}' was not found.")
+
+    for relationship in relationships_root.findall(f"{{{PKG_REL_NS}}}Relationship"):
+        if relationship.get("Id") == relationship_id:
+            target = relationship.get("Target", "")
+            if target.startswith("/"):
+                return target.lstrip("/")
+            return f"xl/{target.lstrip('/')}"
+
+    raise RuntimeError(f"Worksheet relationship for '{sheet_name}' was not found.")
+
+
+def _find_or_create_row(sheet_data, row_index):
+    """Return existing row element or insert a new one in sorted position."""
+    row_tag = f"{{{XML_NS}}}row"
+
+    for row in sheet_data.findall(row_tag):
+        if int(row.get("r", "0")) == row_index:
+            return row
+
+    new_row = ET.Element(row_tag, {"r": str(row_index)})
+    inserted = False
+    for position, row in enumerate(sheet_data.findall(row_tag)):
+        if int(row.get("r", "0")) > row_index:
+            sheet_data.insert(position, new_row)
+            inserted = True
+            break
+
+    if not inserted:
+        sheet_data.append(new_row)
+
+    return new_row
+
+
+def _find_or_create_cell(row_element, row_index, column_index):
+    """Return existing cell element or insert a new one in sorted position."""
+    cell_ref = _sheet_cell_reference(row_index, column_index)
+    cell_tag = f"{{{XML_NS}}}c"
+
+    for cell in row_element.findall(cell_tag):
+        if cell.get("r") == cell_ref:
+            return cell
+
+    new_cell = ET.Element(cell_tag, {"r": cell_ref})
+    inserted = False
+    for position, cell in enumerate(row_element.findall(cell_tag)):
+        if _cell_column_index(cell.get("r", "A1")) > column_index:
+            row_element.insert(position, new_cell)
+            inserted = True
+            break
+
+    if not inserted:
+        row_element.append(new_cell)
+
+    return new_cell
+
+
+def _set_cell_plain_text(cell, text):
+    """Replace cell contents with inline plain text while preserving attributes/styles."""
+    for child in list(cell):
+        cell.remove(child)
+
+    cell.set("t", "inlineStr")
+    is_node = ET.SubElement(cell, f"{{{XML_NS}}}is")
+    text_node = ET.SubElement(is_node, f"{{{XML_NS}}}t")
+    text_node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text_node.text = text
 
 
 def _export_worksheet_values(source_workbook_path, sheet_name, output_path):
@@ -129,35 +301,58 @@ def _export_worksheet_values(source_workbook_path, sheet_name, output_path):
 
 
 def _write_sql_data_to_oor(source_workbook_path, sql_rows, sheet_name="OOR"):
-    """Overwrite OOR data values in range F:V from row 2 downward using plain text."""
-    wb = load_workbook(source_workbook_path)
-    try:
-        if sheet_name not in wb.sheetnames:
-            raise RuntimeError(f"Worksheet '{sheet_name}' was not found.")
+    """Overwrite OOR F:V values by editing sheet XML directly to preserve workbook metadata."""
+    start_row = 2
+    start_col = 6   # F
+    end_col = 22    # V
 
-        ws = wb[sheet_name]
+    with zipfile.ZipFile(source_workbook_path, "r") as source_zip:
+        sheet_archive_path = _resolve_sheet_archive_path(source_zip, sheet_name)
+        sheet_root = ET.fromstring(source_zip.read(sheet_archive_path))
+        sheet_data = sheet_root.find(f"{{{XML_NS}}}sheetData")
 
-        start_row = 2
-        start_col = 6   # F
-        end_col = 22    # V
-        max_existing_row = ws.max_row
+        if sheet_data is None:
+            raise RuntimeError(f"Worksheet '{sheet_name}' does not contain sheet data.")
 
-        # Clear old values in F2:V(last existing row) without touching styles.
+        max_existing_row = 0
+        for row in sheet_data.findall(f"{{{XML_NS}}}row"):
+            max_existing_row = max(max_existing_row, int(row.get("r", "0")))
+
         if max_existing_row >= start_row:
             for row_idx in range(start_row, max_existing_row + 1):
+                row_element = _find_or_create_row(sheet_data, row_idx)
                 for col_idx in range(start_col, end_col + 1):
-                    ws.cell(row=row_idx, column=col_idx).value = None
+                    cell = _find_or_create_cell(row_element, row_idx, col_idx)
+                    _set_cell_plain_text(cell, "")
 
-        # Write SQL values as plain text.
         for offset, sql_row in enumerate(sql_rows):
             row_idx = start_row + offset
+            row_element = _find_or_create_row(sheet_data, row_idx)
             for col_offset, col_name in enumerate(SQL_MAIN_EXPORT_COLUMNS):
                 col_idx = start_col + col_offset
-                ws.cell(row=row_idx, column=col_idx).value = _to_plain_text(sql_row.get(col_name, ""))
+                cell = _find_or_create_cell(row_element, row_idx, col_idx)
+                _set_cell_plain_text(cell, _to_plain_text(sql_row.get(col_name, "")))
 
-        wb.save(source_workbook_path)
-    finally:
-        wb.close()
+        updated_sheet_xml = ET.tostring(
+            sheet_root,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
+            temp_path = temp_file.name
+
+        try:
+            with zipfile.ZipFile(temp_path, "w") as target_zip:
+                for zip_info in source_zip.infolist():
+                    if zip_info.filename == sheet_archive_path:
+                        target_zip.writestr(zip_info, updated_sheet_xml)
+                    else:
+                        target_zip.writestr(zip_info, source_zip.read(zip_info.filename))
+            shutil.move(temp_path, source_workbook_path)
+        finally:
+            if Path(temp_path).exists():
+                Path(temp_path).unlink(missing_ok=True)
 
 
 def _save_sql_snapshot(sql_rows, output_path):
@@ -219,6 +414,7 @@ def Sync_Open_Order_Report_With_SQL(
         end_due_date=end_due_date,
     )
     sql_rows = _exclude_rows_by_customer_name(sql_rows)
+    sql_rows = _validate_sql_rows(sql_rows)
 
     _write_sql_data_to_oor(source_path, sql_rows, sheet_name="OOR")
 
@@ -335,6 +531,7 @@ def Read_File(
                 end_due_date=end_due_date,
             )
             raw_rows = _exclude_rows_by_customer_name(raw_rows)
+            raw_rows = _validate_sql_rows(raw_rows)
             return _normalize_sql_rows(raw_rows)
 
         raise RuntimeError(f"Unsupported input source '{source}'. Use 'excel' or 'sql'.")
@@ -345,6 +542,8 @@ def Read_File(
             ) from exc
 
         if source == "sql":
-            raise RuntimeError("Failed to read schedule input from SQL main dashboard query") from exc
+            raise RuntimeError(
+                f"Failed to read schedule input from SQL main dashboard query: {exc}"
+            ) from exc
 
         raise

@@ -71,35 +71,119 @@ MAIN_DASHBOARD_SQL = """
 
 
 MAIN_DASHBOARD_LIVE_SQL = """
+    ;WITH MainOpenOrders AS (
+        SELECT
+            UPPER(LTRIM(RTRIM(jm.JOBNUMBER))) AS JobNumber,
+            TRY_CONVERT(date, jm.SCHEDULESDUEDATESTRING) AS DueDate,
+            NULLIF(LTRIM(RTRIM(jm.CUSTOMERNAME)), '') AS CustomerName,
+            NULLIF(LTRIM(RTRIM(jm.PRODUCTCODE)), '') AS PartNumber,
+            NULLIF(LTRIM(RTRIM(jm.JOBTYPE)), '') AS JobType,
+            NULLIF(LTRIM(RTRIM(ic.BASEMATERIAL)), '') AS Alloy,
+            NULLIF(LTRIM(RTRIM(jm.USERDEFINED7)), '') AS CastingType,
+            NULLIF(LTRIM(RTRIM(jm.PONUMBER)), '') AS PONumber,
+            COALESCE(jm.QUANTITYREQUIRED, 0) AS QuantityOfCastings,
+            COALESCE(
+                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(jm.USERDEFINED10)), '')),
+                0
+            ) AS CastingsPerMold,
+            COALESCE(jm.MOLDSREQUIRED, 0) AS QuantityOfMolds,
+            CAST(0 AS decimal(18, 6)) AS QuantityOfCores,
+            COALESCE(
+                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(jm.USERDEFINED5)), '')),
+                0
+            ) AS PourWeight,
+            COALESCE(jm.CONTRACTREVISEDAMOUNT, jm.CONTRACTORIGINALAMOUNT, 0) AS TotalValue,
+            COALESCE(jm.QUANTITYPRODUCED, 0) AS CastingsProduced,
+            COALESCE(jm.MOLDSPRODUCED, 0) AS MoldsCompleted
+        FROM dbo.JCJobMaster jm
+        LEFT JOIN dbo.ICMaster ic
+            ON ic.PRODUCTCODE = jm.PRODUCTCODE
+        WHERE NULLIF(LTRIM(RTRIM(jm.JOBNUMBER)), '') IS NOT NULL
+          AND jm.JOBSTATUSFLAG = 'I'
+    ),
+    OpenOrdersAgg AS (
+        SELECT
+            UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, ''))))) AS JobNumber,
+            MAX(NULLIF(LTRIM(RTRIM(d.PRODUCTNUMBER)), '')) AS OpenPartNumber,
+            MAX(NULLIF(LTRIM(RTRIM(d.JOBTYPE)), '')) AS OpenJobType,
+            MAX(NULLIF(LTRIM(RTRIM(h.CUSTOMERPO)), '')) AS CustomerPO,
+            SUM(COALESCE(d.QUANTITYORDERED, 0)) AS OpenQtyOrdered,
+            SUM(COALESCE(d.PIECESSHIPPEDTODATE, 0)) AS OpenQtyShipped,
+            MAX(
+                COALESCE(
+                    TRY_CONVERT(date, CONVERT(varchar(30), h.SHIPDATE), 126),
+                    TRY_CONVERT(date, CONVERT(varchar(8), h.SHIPDATE), 112)
+                )
+            ) AS OpenShipDate,
+            SUM(COALESCE(d.EXTENDEDORDERVALUE, 0)) AS OpenTotalValue
+        FROM dbo.OEDetail d
+        INNER JOIN dbo.OEHEader h
+            ON h.ORDERNUMBER = d.ORDERNUMBER
+        WHERE COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) IS NOT NULL
+        GROUP BY
+            UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))))
+    ),
+    MainAndOrders AS (
+        SELECT
+            COALESCE(m.JobNumber, o.JobNumber) AS JobNumber,
+            m.DueDate,
+            m.CustomerName,
+            COALESCE(m.PartNumber, o.OpenPartNumber) AS PartNumber,
+            COALESCE(m.JobType, o.OpenJobType) AS JobType,
+            COALESCE(m.Alloy, NULLIF(LTRIM(RTRIM(icAlt.BASEMATERIAL)), '')) AS Alloy,
+            m.CastingType,
+            CASE
+                WHEN o.CustomerPO IS NULL THEN m.PONumber
+                ELSE o.CustomerPO
+            END AS PONumberFinal,
+            CASE
+                WHEN o.OpenQtyOrdered IS NULL THEN m.QuantityOfCastings
+                ELSE o.OpenQtyOrdered
+            END AS QtyOrderedFinal,
+            m.QuantityOfMolds,
+            m.CastingsPerMold,
+            m.QuantityOfCores,
+            m.PourWeight,
+            m.TotalValue,
+            m.CastingsProduced,
+            m.MoldsCompleted,
+            o.OpenQtyShipped,
+            o.OpenShipDate,
+            o.OpenTotalValue
+        FROM MainOpenOrders m
+        FULL OUTER JOIN OpenOrdersAgg o
+            ON o.JobNumber = m.JobNumber
+        LEFT JOIN dbo.ICMaster icAlt
+            ON icAlt.PRODUCTCODE = COALESCE(m.PartNumber, o.OpenPartNumber)
+    )
     SELECT
-        COALESCE(
-            TRY_CONVERT(date, CONVERT(varchar(30), d.REQUIREDDATE), 126),
-            TRY_CONVERT(date, CONVERT(varchar(8), d.REQUIREDDATE), 112),
-            TRY_CONVERT(date, CONVERT(varchar(30), h.REQUIREDDATE), 126),
-            TRY_CONVERT(date, CONVERT(varchar(8), h.REQUIREDDATE), 112)
-        ) AS [Due Date],
-        h.CUSTOMERNAME AS [Customer Name],
-        d.PRODUCTNUMBER AS [Part Number],
-        d.JOBTYPE AS [Job Type],
-        COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) AS [Job Number],
-        '' AS [Alloy],
-        COALESCE(d.DETAILTYPE, '') AS [Casting Type],
-        d.QUANTITYORDERED AS [QTY Ordered],
-        d.QUANTITYORDERED AS [Quantity of Molds],
-        1 AS [Castings Per Mold],
-        0 AS [Quantity of Cores],
-        COALESCE(d.ORDEREDWEIGHT, 0) AS [Pour Weight],
-        COALESCE(d.ORDEREDWEIGHT, 0) AS [Total Pour WT],
-        COALESCE(d.EXTENDEDORDERVALUE, 0) AS [Total Value],
+        DueDate AS [Due Date],
+        CustomerName AS [Customer Name],
+        PartNumber AS [Part Number],
+        JobType AS [Job Type],
+        JobNumber AS [Job Number],
+        Alloy AS [Alloy],
+        CastingType AS [Casting Type],
+        CAST(COALESCE(QtyOrderedFinal, 0) AS decimal(18, 4)) AS [QTY Ordered],
+        CAST(COALESCE(QuantityOfMolds, 0) AS decimal(18, 4)) AS [Quantity of Molds],
+        CAST(COALESCE(NULLIF(CastingsPerMold, 0), 1) AS decimal(18, 4)) AS [Castings Per Mold],
+        CAST(COALESCE(QuantityOfCores, 0) AS decimal(18, 4)) AS [Quantity of Cores],
+        CAST(COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Pour Weight],
+        CAST(COALESCE(QtyOrderedFinal, 0) * COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Total Pour WT],
+        CAST(COALESCE(OpenTotalValue, TotalValue, 0) AS decimal(18, 4)) AS [Total Value],
         '' AS [Heat No Assigned],
-        COALESCE(d.PIECESSHIPPEDTODATE, 0) AS [Castings Produced],
-        COALESCE(d.ALLOCATEDPIECES, 0) AS [Molds Completed]
-    FROM dbo.OEHEader h
-    INNER JOIN dbo.OEDetail d
-        ON d.ORDERNUMBER = h.ORDERNUMBER
+        CAST(COALESCE(CastingsProduced, 0) AS decimal(18, 4)) AS [Castings Produced],
+        CAST(COALESCE(MoldsCompleted, 0) AS decimal(18, 4)) AS [Molds Completed]
+    FROM MainAndOrders
+        WHERE DueDate IS NOT NULL
+            AND DueDate >= '2000-01-01'
+            AND NULLIF(LTRIM(RTRIM(CustomerName)), '') IS NOT NULL
+            AND NULLIF(LTRIM(RTRIM(PartNumber)), '') IS NOT NULL
+            AND NULLIF(LTRIM(RTRIM(JobNumber)), '') IS NOT NULL
+            AND NULLIF(LTRIM(RTRIM(Alloy)), '') IS NOT NULL
     ORDER BY
-                [Due Date],
-        COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, ''));
+        [Due Date],
+        [Job Number];
 """
 
 

@@ -98,6 +98,40 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["Customer Name"], "Customer B")
 
+    def test_read_file_sql_reports_incomplete_joined_rows(self):
+        sql_rows = [
+            {
+                "Due Date": "",
+                "Customer Name": "Customer B",
+                "Part Number": "",
+                "Job Type": "",
+                "Job Number": "B-1",
+                "Alloy": "",
+                "Casting Type": "",
+                "Quantity of Molds": 8,
+                "Molds Completed": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Pour Weight": 90,
+            },
+        ]
+
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+            with self.assertRaises(RuntimeError) as context:
+                Read_File(source="sql")
+
+        message = str(context.exception)
+        self.assertIn("SQL scheduler input validation failed", message)
+        self.assertIn("Due Date", message)
+        self.assertIn("Part Number", message)
+
+    def test_read_file_sql_reports_zero_matched_rows(self):
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=[]):
+            with self.assertRaises(RuntimeError) as context:
+                Read_File(source="sql")
+
+        self.assertIn("No rows were returned", str(context.exception))
+
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -176,7 +210,7 @@ class SchedulerIOTests(unittest.TestCase):
             self.assertEqual(synced_ws.cell(row=2, column=6).value, "2026-08-04")
             self.assertEqual(synced_ws.cell(row=2, column=7).value, "Customer A")
             self.assertEqual(synced_ws.cell(row=2, column=22).value, "1")
-            self.assertIsNone(synced_ws.cell(row=3, column=6).value)
+            self.assertEqual(synced_ws.cell(row=3, column=6).value, "")
             synced_wb.close()
 
             snapshot_wb = load_workbook(result["db_snapshot_path"])
