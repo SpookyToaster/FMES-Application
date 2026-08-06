@@ -152,6 +152,31 @@ class SchedulerIOTests(unittest.TestCase):
 
         self.assertIn("No rows were returned", str(context.exception))
 
+    def test_read_file_sql_allows_blank_alloy_rows(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer A",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "VUPN",
+                "Alloy": "",
+                "Casting Type": "L",
+                "Quantity of Molds": 5,
+                "Molds Completed": 1,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+            },
+        ]
+
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+            frame = Read_File(source="sql")
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["Job Number"], "VUPN")
+        self.assertEqual(frame.iloc[0]["Alloy"], "")
+
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

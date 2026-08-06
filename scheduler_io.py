@@ -72,7 +72,6 @@ REQUIRED_SQL_TEXT_COLUMNS = [
     "Customer Name",
     "Part Number",
     "Job Number",
-    "Alloy",
 ]
 
 

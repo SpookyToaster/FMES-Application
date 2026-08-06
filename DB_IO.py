@@ -92,11 +92,21 @@ MAIN_DASHBOARD_LIVE_SQL = """
                 0
             ) AS CastingsPerMold,
             COALESCE(jm.MOLDSREQUIRED, 0) AS QuantityOfMolds,
-            CAST(0 AS decimal(18, 6)) AS QuantityOfCores,
             COALESCE(
-                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(jm.USERDEFINED5)), '')),
+                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(jm.USERDEFINED6)), '')),
+                0
+            ) AS QuantityOfCores,
+            COALESCE(
+                TRY_CONVERT(
+                    decimal(18, 6),
+                    NULLIF(
+                        LTRIM(RTRIM(REPLACE(REPLACE(CONVERT(varchar(100), jm.USERDEFINED5), ',', ''), '$', ''))),
+                        ''
+                    )
+                ),
                 0
             ) AS PourWeight,
+            COALESCE(jm.POURQUANTITY, 0) AS TotalPourWT,
             COALESCE(jm.CONTRACTREVISEDAMOUNT, jm.CONTRACTORIGINALAMOUNT, 0) AS TotalValue,
             COALESCE(jm.QUANTITYPRODUCED, 0) AS CastingsProduced,
             COALESCE(jm.MOLDSPRODUCED, 0) AS MoldsCompleted
@@ -173,6 +183,7 @@ MAIN_DASHBOARD_LIVE_SQL = """
             m.CastingsPerMold,
             m.QuantityOfCores,
             m.PourWeight,
+            m.TotalPourWT,
             m.TotalValue,
             m.CastingsProduced,
             m.MoldsCompleted,
@@ -196,18 +207,11 @@ MAIN_DASHBOARD_LIVE_SQL = """
         Alloy AS [Alloy],
         CastingType AS [Casting Type],
         CAST(COALESCE(QtyOrderedFinal, 0) AS decimal(18, 4)) AS [QTY Ordered],
-        CAST(
-            CASE
-                -- Power BI model derives molds from ordered castings when casts/mold is available.
-                WHEN COALESCE(NULLIF(CastingsPerMold, 0), 0) > 0
-                    THEN COALESCE(QtyOrderedFinal, 0) / CastingsPerMold
-                ELSE COALESCE(QuantityOfMolds, 0)
-            END AS decimal(18, 4)
-        ) AS [Quantity of Molds],
-        CAST(COALESCE(NULLIF(CastingsPerMold, 0), 1) AS decimal(18, 4)) AS [Castings Per Mold],
+        CAST(COALESCE(QuantityOfMolds, 0) AS decimal(18, 4)) AS [Quantity of Molds],
+        CAST(COALESCE(CastingsPerMold, 0) AS decimal(18, 4)) AS [Castings Per Mold],
         CAST(COALESCE(QuantityOfCores, 0) AS decimal(18, 4)) AS [Quantity of Cores],
         CAST(COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Pour Weight],
-        CAST(COALESCE(QtyOrderedFinal, 0) * COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Total Pour WT],
+        CAST(COALESCE(TotalPourWT, 0) AS decimal(18, 4)) AS [Total Pour WT],
         CAST(COALESCE(OpenTotalValue, TotalValue, 0) AS decimal(18, 4)) AS [Total Value],
         COALESCE(MainHeatNoAssigned, HeatNumber, '') AS [Heat No Assigned],
         CAST(NULLIF(COALESCE(CastingsProduced, 0), 0) AS decimal(18, 4)) AS [Castings Produced],
