@@ -62,10 +62,6 @@ def Schedule_Molds():
             print(f"DB Snapshot: {sync_result['db_snapshot_path']}")
 
             input_file = Read_File(source="sql", run_id=run_id)
-
-            if input_file.empty:
-                # Keep operations running if SQL source is empty for the selected run.
-                input_file = Read_File(source="excel")
         elif schedule_source == "excel":
             input_file = Read_File(source="excel")
         else:

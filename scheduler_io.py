@@ -63,6 +63,10 @@ EXCLUDED_CUSTOMER_NAMES = {"MONETT"}
 XML_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+XR_NS = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+XR2_NS = "http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"
+XR3_NS = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"
+X14AC_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"
 REQUIRED_SQL_TEXT_COLUMNS = [
     "Due Date",
     "Customer Name",
@@ -273,6 +277,49 @@ def _set_cell_plain_text(cell, text):
     text_node.text = text
 
 
+def _restore_ignorable_namespace_declarations(xml_bytes):
+    """
+    Restore namespace declarations referenced by Ignorable after ET serialization.
+
+    ElementTree can rename/drop prefixes for unused namespaces, but worksheets may
+    still include an Ignorable list that references those prefixes. Excel then
+    repairs the sheet as malformed. This keeps the needed declarations present.
+    """
+    xml_text = xml_bytes.decode("utf-8")
+    xml_decl_end = xml_text.find("?>")
+    search_start = xml_decl_end + 2 if xml_decl_end >= 0 else 0
+    root_tag_start = xml_text.find("<", search_start)
+    if root_tag_start < 0:
+        return xml_bytes
+
+    root_tag_end = xml_text.find(">", root_tag_start)
+    if root_tag_end <= root_tag_start:
+        return xml_bytes
+
+    root_open = xml_text[root_tag_start:root_tag_end]
+    if "Ignorable=\"x14ac xr xr2 xr3\"" not in root_open:
+        return xml_bytes
+
+    missing_decls = []
+    required = {
+        "x14ac": X14AC_NS,
+        "xr": XR_NS,
+        "xr2": XR2_NS,
+        "xr3": XR3_NS,
+    }
+
+    for prefix, uri in required.items():
+        marker = f'xmlns:{prefix}="'
+        if marker not in root_open:
+            missing_decls.append(f' xmlns:{prefix}="{uri}"')
+
+    if not missing_decls:
+        return xml_bytes
+
+    patched = xml_text[:root_tag_end] + "".join(missing_decls) + xml_text[root_tag_end:]
+    return patched.encode("utf-8")
+
+
 def _export_worksheet_values(source_workbook_path, sheet_name, output_path):
     """Export raw worksheet values into a standalone workbook."""
     source_wb = load_workbook(source_workbook_path, data_only=True)
@@ -338,6 +385,7 @@ def _write_sql_data_to_oor(source_workbook_path, sql_rows, sheet_name="OOR"):
             encoding="utf-8",
             xml_declaration=True,
         )
+        updated_sheet_xml = _restore_ignorable_namespace_declarations(updated_sheet_xml)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
             temp_path = temp_file.name

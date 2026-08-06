@@ -314,9 +314,9 @@ def Assign_days(schedule_df):
                     molds_remaining -= molds_for_day
 
                 if molds_remaining > 0:
+                    # Spill remaining molds for this extension into the next day.
                     day += 1
 
-        print(day_usage)
         return pd.DataFrame(allocated_rows)
     except Exception as exc:
         raise RuntimeError("Failed while assigning schedule days") from exc

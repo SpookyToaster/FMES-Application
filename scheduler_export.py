@@ -103,6 +103,9 @@ def Build_Excel_Rows(export_blocks):
     Each day contributes: a header row, a column-label row, data rows, a TOTALS
     row, and one blank spacer row.
 
+    This is an alternate representation used for verification and lightweight
+    consumers; Export_Mold_Schedule writes directly from structured blocks.
+
     Returns:
         list of lists – each inner list represents one Excel row.
     """

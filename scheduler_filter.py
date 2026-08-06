@@ -23,7 +23,6 @@ from config import Columns
 filtered_job_counts = {
     "blank": 0,
     "hold": 0,
-    "scheduled": 0,
     "job_type": 0,
     "cast_type": 0,
     "no_molds": 0,
@@ -77,7 +76,7 @@ def Mold_Scheduler(ReadyToMold):
 
 
 def jobs_to_schedule_test(jobs_to_schedule):
-    """Print a diagnostic list of jobs selected for scheduling."""
+    """Print a diagnostic list of jobs selected for scheduling (manual debug helper)."""
     print("\nJobs selected for scheduling:")
 
     for job in jobs_to_schedule:
@@ -91,7 +90,7 @@ def jobs_to_schedule_test(jobs_to_schedule):
 
 
 def scheduled_rows_test(schedule_rows):
-    """Print a diagnostic list of expanded extension rows."""
+    """Print expanded extension rows (manual debug helper)."""
     for row in schedule_rows:
         print(
             f"{row[Columns.COL_JOB_NUMBER]}"

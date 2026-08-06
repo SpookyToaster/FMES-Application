@@ -9,10 +9,30 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scheduler_io import Read_File, SQL_MAIN_EXPORT_COLUMNS, Sync_Open_Order_Report_With_SQL
+from scheduler_io import (
+    Read_File,
+    SQL_MAIN_EXPORT_COLUMNS,
+    Sync_Open_Order_Report_With_SQL,
+    _restore_ignorable_namespace_declarations,
+)
 
 
 class SchedulerIOTests(unittest.TestCase):
+    def test_restore_ignorable_namespace_declarations_adds_missing_prefixes(self):
+        xml_bytes = (
+            b'<?xml version="1.0" encoding="utf-8"?>'
+            b'<s:worksheet xmlns:s="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            b'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+            b'mc:Ignorable="x14ac xr xr2 xr3"><s:sheetData/></s:worksheet>'
+        )
+
+        patched = _restore_ignorable_namespace_declarations(xml_bytes).decode("utf-8")
+
+        self.assertIn('xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"', patched)
+        self.assertIn('xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"', patched)
+        self.assertIn('xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"', patched)
+        self.assertIn('xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"', patched)
+
     def test_read_file_strips_headers(self):
         frame = pd.DataFrame(columns=[" Job Number ", " Due Date "])
 
