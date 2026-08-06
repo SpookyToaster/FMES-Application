@@ -1,6 +1,6 @@
 # Roadmap
 
-**Last Updated:** August 3, 2026
+**Last Updated:** August 6, 2026
 
 ## Vision
 
@@ -40,11 +40,15 @@ Production conditions will change daily. The system should adapt rather than att
 - Boundary test suite added for IO, filtering, building, export, integration, and DB environment checks
 - Credential handling moved to local environment variables
 - DB startup environment validator added in [check_db_env.py](check_db_env.py)
+- Historical snapshot SQL schema and loader pipeline implemented ([HistoricalReporting_ERP_Exact.sql](HistoricalReporting_ERP_Exact.sql), [load_historical_snapshot.py](load_historical_snapshot.py))
+- DB metadata discovery and dashboard data access methods implemented in [DB_IO.py](DB_IO.py)
+- Production-ready dashboard SQL query pack added in [Production_Report_Queries.sql](Production_Report_Queries.sql)
 
 ### In Progress
 
-- DB connection setup pattern is implemented, but no production schedule persistence tables are in use yet
+- DB report read layer is implemented; application-level orchestration of automated dashboard refresh/export is still in progress
 - Error handling is present across scheduling and DB entrypoints, with room for centralized logging
+- Schedule persistence model is still not in use for run-to-run carryforward
 
 ### Open Gaps
 
@@ -56,21 +60,21 @@ Production conditions will change daily. The system should adapt rather than att
 
 ## Phase 1 - Refactoring & Foundation
 
-### Status: Mostly Complete
+### Status: Complete (with targeted follow-ups)
 
 ### Code Organization
 
 - Completed: split scheduler into logical modules
 - Partially completed: centralize configuration and constants
-- In progress: implement a database abstraction layer
+- Completed: implement core database access layer for configuration, metadata, and report retrieval
 - Partially completed: improve error handling
 - Not started: structured application logging
 
 ### Data Infrastructure
 
-- Not started: migrate scheduler data storage to SQL Server
-- Not started: establish reporting tables
-- Not started: create foundational database views
+- Partially completed: establish historical reporting tables and lifecycle upsert path
+- Completed: create production query definitions for Orders/Main dashboard data sets
+- Not started: migrate scheduler run-state storage and scheduling decisions to SQL Server
 
 ---
 
@@ -222,6 +226,6 @@ LastModified
 
 ## Next 3 Priorities
 
-1. Add SQL Server schedule run tables and write path for each scheduler execution.
+1. Add SQL Server schedule run-state tables and write path for each scheduler execution.
 2. Preserve prior run assignments to reduce schedule churn between runs.
-3. Add structured logging for pipeline stages and DB interactions.
+3. Wire [DB_IO.py](DB_IO.py) dashboard methods into scheduled exports/distribution and add structured logging for DB and pipeline stages.

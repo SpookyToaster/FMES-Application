@@ -1,7 +1,7 @@
 # Production Scheduler
 
 **Author:** Logan Burkardt  
-**Last Updated:** August 3, 2026
+**Last Updated:** August 6, 2026
 
 ---
 
@@ -22,10 +22,14 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 - Unit and integration test coverage for scheduling boundaries
 - Local credential hardening using environment variables
 - Startup environment validation utility for DB configuration
+- SQL Server historical snapshot load pipeline with transform/upsert support
+- DB metadata/query helpers in [DB_IO.py](DB_IO.py) for table and column discovery
+- Callable dashboard query methods in [DB_IO.py](DB_IO.py) for Orders and Main report datasets
+- Production SQL report script in [Production_Report_Queries.sql](Production_Report_Queries.sql)
 
 ### In Progress
 
-- SQL Server integration beyond basic connection setup
+- SQL Server integration beyond reporting reads (write-back schedule persistence)
 - Persistent schedule state between runs
 
 ### Not Started
@@ -36,7 +40,7 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 
 ## Considerations
 
-- Current greedy achrictecture is encountering edge case and multi-departmental optimization constraints. Design review for a staged optimized mold schedule and then optimized melt schedule is needed. 
+- Current greedy architecture encounters edge cases and multi-department optimization constraints. A design review for staged optimization (mold first, then melt) is still needed.
 
 ---
 
@@ -54,9 +58,18 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 - [scheduler_build.py](scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
 - [scheduler_export.py](scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
 
+### Database & Reporting Modules
+
+- [Database.py](Database.py) validates DB environment and opens SQL Server connections.
+- [DB_IO.py](DB_IO.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_orders_dashboard_rows`, `get_main_dashboard_rows`).
+- [load_historical_snapshot.py](load_historical_snapshot.py) loads ERP snapshot CSV data into SQL Server history tables.
+- [Production_Report_Queries.sql](Production_Report_Queries.sql) contains production-ready SQL for Orders and Main dashboard column sets.
+
 ### Tests
 
 - [tests/test_database.py](tests/test_database.py)
+- [tests/test_DB_IO.py](tests/test_DB_IO.py)
+- [tests/test_historical_loader.py](tests/test_historical_loader.py)
 - [tests/test_scheduler_io.py](tests/test_scheduler_io.py)
 - [tests/test_scheduler_filter.py](tests/test_scheduler_filter.py)
 - [tests/test_scheduler_build.py](tests/test_scheduler_build.py)
@@ -94,6 +107,13 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 - Exports `Heat Summary.xlsx` with:
         - `Heat Summary` sheet (date + heat + alloy + lbs + molds)
         - `Daily Heat Totals` sheet (heats/day + lbs/day + molds/day)
+
+### Database Reporting Behavior
+
+- Supports SQL metadata discovery directly from Python through [DB_IO.py](DB_IO.py).
+- Supports callable Orders dashboard extraction from OE header/detail tables.
+- Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run.
+- Supports operational SQL execution from [Production_Report_Queries.sql](Production_Report_Queries.sql) for direct SSMS usage.
 
 ---
 
@@ -151,8 +171,10 @@ Use [check_db_env.py](check_db_env.py) before running DB-dependent tasks.
 Run the test suite from the project folder:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
+
+Current verification snapshot: 24 tests passing.
 
 The current suite covers:
 
