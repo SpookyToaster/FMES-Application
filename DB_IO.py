@@ -70,6 +70,39 @@ MAIN_DASHBOARD_SQL = """
 """
 
 
+MAIN_DASHBOARD_LIVE_SQL = """
+    SELECT
+        COALESCE(
+            TRY_CONVERT(date, CONVERT(varchar(30), d.REQUIREDDATE), 126),
+            TRY_CONVERT(date, CONVERT(varchar(8), d.REQUIREDDATE), 112),
+            TRY_CONVERT(date, CONVERT(varchar(30), h.REQUIREDDATE), 126),
+            TRY_CONVERT(date, CONVERT(varchar(8), h.REQUIREDDATE), 112)
+        ) AS [Due Date],
+        h.CUSTOMERNAME AS [Customer Name],
+        d.PRODUCTNUMBER AS [Part Number],
+        d.JOBTYPE AS [Job Type],
+        COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) AS [Job Number],
+        '' AS [Alloy],
+        COALESCE(d.DETAILTYPE, '') AS [Casting Type],
+        d.QUANTITYORDERED AS [QTY Ordered],
+        d.QUANTITYORDERED AS [Quantity of Molds],
+        1 AS [Castings Per Mold],
+        0 AS [Quantity of Cores],
+        COALESCE(d.ORDEREDWEIGHT, 0) AS [Pour Weight],
+        COALESCE(d.ORDEREDWEIGHT, 0) AS [Total Pour WT],
+        COALESCE(d.EXTENDEDORDERVALUE, 0) AS [Total Value],
+        '' AS [Heat No Assigned],
+        COALESCE(d.PIECESSHIPPEDTODATE, 0) AS [Castings Produced],
+        COALESCE(d.ALLOCATEDPIECES, 0) AS [Molds Completed]
+    FROM dbo.OEHEader h
+    INNER JOIN dbo.OEDetail d
+        ON d.ORDERNUMBER = h.ORDERNUMBER
+    ORDER BY
+                [Due Date],
+        COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, ''));
+"""
+
+
 def list_tables(schema="dbo", include_views=False):
     """
     Return table metadata from INFORMATION_SCHEMA for the target schema.
@@ -180,6 +213,27 @@ def _rows_to_dicts(cursor, rows):
     return [dict(zip(column_names, row)) for row in rows]
 
 
+def _table_exists(cursor, table_name, schema="dbo"):
+    """Return True when a base table exists in the current database."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = ?
+          AND TABLE_NAME = ?
+          AND TABLE_TYPE = 'BASE TABLE';
+        """,
+        schema,
+        table_name,
+    )
+    return cursor.fetchone() is not None
+
+
+def _history_tables_available(cursor):
+    """Return True when the historical scheduler snapshot tables are present."""
+    return _table_exists(cursor, "SchedulerRun") and _table_exists(cursor, "OrderSnapshot")
+
+
 def get_orders_dashboard_rows(start_date=None, end_date=None):
     """
     Return orders dashboard rows from OE header/detail tables.
@@ -205,22 +259,36 @@ def get_orders_dashboard_rows(start_date=None, end_date=None):
 
 def get_main_dashboard_rows(run_id=None, start_due_date=None, end_due_date=None):
     """
-    Return main dashboard rows from OrderSnapshot for one run (or latest run).
+    Return main dashboard rows using history tables when available, otherwise
+    fall back to live OE header/detail tables.
 
     Args:
-        run_id: SchedulerRun.RunId to target, or None for latest available run.
+        run_id: SchedulerRun.RunId to target, or None for latest available run
+            when history tables exist.
         start_due_date: Inclusive lower bound for DueDate, or None.
         end_due_date: Inclusive upper bound for DueDate, or None.
 
     Returns:
         List of dictionaries keyed by report column labels.
     """
-    params = (run_id, start_due_date, start_due_date, end_due_date, end_due_date)
+    history_params = (run_id, start_due_date, start_due_date, end_due_date, end_due_date)
+    # Date filtering for live OE fallback can be added later in Python to avoid
+    # mixed SQL date/int storage edge cases across ERP schemas.
 
     connection = connect()
     try:
         cursor = connection.cursor()
-        cursor.execute(MAIN_DASHBOARD_SQL, *params)
+
+        if _history_tables_available(cursor):
+            try:
+                cursor.execute(MAIN_DASHBOARD_SQL, *history_params)
+            except Exception:
+                # If history schema exists but query cannot execute, keep the app
+                # usable by falling back to live report tables.
+                cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
+        else:
+            cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
+
         rows = cursor.fetchall()
         return _rows_to_dicts(cursor, rows)
     finally:

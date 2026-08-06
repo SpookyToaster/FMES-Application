@@ -13,6 +13,7 @@ Run directly (python Scheduler.py) or import Schedule_Molds() for testing.
 """
 
 from datetime import datetime, timedelta
+import os
 
 import pandas as pd
 
@@ -33,7 +34,7 @@ from scheduler_export import (
 )
 
 from scheduler_filter import Mold_Scheduler
-from scheduler_io import Read_File
+from scheduler_io import Read_File, Sync_Open_Order_Report_With_SQL
 
 
 def Schedule_Molds():
@@ -48,7 +49,32 @@ def Schedule_Molds():
         RuntimeError: If any pipeline stage fails.
     """
     try:
-        input_file = Read_File()
+        schedule_source = os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
+        run_id_text = os.getenv("SCHEDULER_RUN_ID", "").strip()
+        run_id = int(run_id_text) if run_id_text else None
+
+        if schedule_source == "sql":
+            sync_result = Sync_Open_Order_Report_With_SQL(run_id=run_id)
+            print(
+                "Synchronized Open Order Report from SQL "
+                f"({sync_result['row_count']} rows)."
+            )
+            print(f"Backup: {sync_result['backup_path']}")
+            print(f"Historical OOR: {sync_result['historical_oor_path']}")
+            print(f"DB Snapshot: {sync_result['db_snapshot_path']}")
+
+            input_file = Read_File(source="sql", run_id=run_id)
+
+            if input_file.empty:
+                # Keep operations running if SQL source is empty for the selected run.
+                input_file = Read_File(source="excel")
+        elif schedule_source == "excel":
+            input_file = Read_File(source="excel")
+        else:
+            raise RuntimeError(
+                f"Unsupported SCHEDULER_INPUT_SOURCE '{schedule_source}'. Use 'sql' or 'excel'."
+            )
+
         jobs_to_schedule = Mold_Scheduler(input_file)
         schedule_rows = Build_Schedule_Rows(jobs_to_schedule)
 

@@ -22,6 +22,7 @@ from config import Columns, DailyMoldLimits
 EXTENSION_WEIGHT_LIMIT_LBS = 2300
 EXTENSION_MOLD_LIMIT = 10
 HEAT_WEIGHT_LIMIT_LBS = 2300
+_EXTENSION_ALPHABET = [ch for ch in string.ascii_uppercase if ch != "L"]
 
 
 def _safe_int(value, default=0):
@@ -49,10 +50,24 @@ def get_extensions(num_splits):
         return [""]
 
     extensions = []
-    alphabet = list(string.ascii_uppercase)
+
+    def _label_for_index(index):
+        """Return a rollover label (A..Z without L, then AA, AB, ...)."""
+        if index < 0:
+            raise ValueError("index must be non-negative")
+
+        base = len(_EXTENSION_ALPHABET)
+        value = index + 1
+        label_parts = []
+
+        while value > 0:
+            value, remainder = divmod(value - 1, base)
+            label_parts.append(_EXTENSION_ALPHABET[remainder])
+
+        return "".join(reversed(label_parts))
 
     for i in range(num_splits - 1):
-        extensions.append(alphabet[i])
+        extensions.append(_label_for_index(i))
 
     extensions.append("L")
     return extensions

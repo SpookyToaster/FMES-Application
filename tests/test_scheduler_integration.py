@@ -43,6 +43,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
         }
 
         with patch("Scheduler.Read_File", return_value=input_file), \
+               patch("Scheduler.Sync_Open_Order_Report_With_SQL", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("Scheduler.Mold_Scheduler", return_value=input_file.iloc[[0]]), \
              patch("Scheduler.Build_Schedule_Rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
              patch("Scheduler.Assign_days", side_effect=lambda df: df.assign(**{"Schedule Day": 1})), \

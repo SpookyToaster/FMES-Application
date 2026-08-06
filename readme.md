@@ -82,8 +82,11 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 
 ### Input Processing
 
-- Reads the Open Order Report from the configured Excel file.
-- Strips whitespace from column headers after loading.
+- Defaults to SQL-backed input using [DB_IO.py](DB_IO.py) `get_main_dashboard_rows()`.
+- Falls back to the Open Order Report Excel file when SQL input is empty for the selected run.
+- Supports explicit source selection via `SCHEDULER_INPUT_SOURCE` (`sql` or `excel`).
+- Supports optional SQL run selection via `SCHEDULER_RUN_ID`.
+- Strips whitespace from Excel column headers after loading.
 - Filters out rows that are not eligible for molding.
 - Uses modular orchestration to run each scheduling stage.
 
@@ -114,6 +117,15 @@ The program now uses a modular layout instead of a single monolithic script. [Sc
 - Supports callable Orders dashboard extraction from OE header/detail tables.
 - Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run.
 - Supports operational SQL execution from [Production_Report_Queries.sql](Production_Report_Queries.sql) for direct SSMS usage.
+
+### Open Order Report Sync Workflow
+
+When running with `SCHEDULER_INPUT_SOURCE=sql`, [Scheduler.py](Scheduler.py) now calls [scheduler_io.py](scheduler_io.py) `Sync_Open_Order_Report_With_SQL()` before scheduling:
+
+- Backs up `Open Order Report.xlsx` to `...\Quality\Schedule\Backups` using an incremented filename.
+- Exports the current `OOR` sheet values to `...\Quality\Schedule\Historical OORs\OOR-YYYY-MM-DD_###.xlsx`.
+- Overwrites `OOR` worksheet values in range `F2:V*` with current SQL data as plain text only (formatting unchanged).
+- Writes a SQL snapshot workbook to `...\Quality\Schedule\Historical DB Snapshots` for day-over-day comparison.
 
 ---
 
