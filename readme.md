@@ -210,10 +210,16 @@ Latest focused verification pass: 31 tests passing after scheduler IO and DB que
 Build the executable from the project root with:
 
 ```powershell
-.venv\Scripts\python.exe -m PyInstaller Scheduler.spec --noconfirm --clean --workpath "build_$(Get-Date -Format yyyyMMdd_HHmmss)" --distpath "dist_$(Get-Date -Format yyyyMMdd_HHmmss)"
+.\build_scheduler.ps1
 ```
 
-This timestamped `--workpath` and `--distpath` pattern avoids Windows/OneDrive file lock collisions in reused `build` folders.
+That script writes PyInstaller work/dist output to a local path under `%LOCALAPPDATA%\SchedulerProgram\PyInstaller`, which avoids OneDrive lock conflicts and removes the need to manage build folders manually.
+
+If you need to run PyInstaller directly, use a fresh work/dist path each time:
+
+```powershell
+.venv\Scripts\python.exe -m PyInstaller Scheduler.spec --noconfirm --clean --workpath "build_$(Get-Date -Format yyyyMMdd_HHmmss)" --distpath "dist_$(Get-Date -Format yyyyMMdd_HHmmss)"
+```
 
 ---
 

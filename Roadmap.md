@@ -51,7 +51,7 @@ Production conditions will change daily. The system should adapt rather than att
 - DB report read layer is implemented; application-level orchestration of automated dashboard refresh/export is still in progress
 - Error handling is present across scheduling and DB entrypoints, with room for centralized logging
 - Schedule persistence model is still not in use for run-to-run carryforward
-- Build and release process hardening is in progress (timestamped PyInstaller work/dist paths to avoid Windows lock conflicts)
+- Build and release process hardening is in progress (`build_scheduler.ps1` now writes PyInstaller output to local AppData paths to avoid Windows/OneDrive lock conflicts)
 
 ### Open Gaps
 
