@@ -1,6 +1,7 @@
 """Workbook sync helpers for FMES Open Order Report updates."""
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import shutil
 import tempfile
@@ -18,6 +19,10 @@ XR_NS = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
 XR2_NS = "http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"
 XR3_NS = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"
 X14AC_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"
+CALC_CHAIN_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"
+
+# SQL_MAIN_EXPORT_COLUMNS offsets that map to OOR columns M,N,O,P,Q,R,S,U.
+NUMERIC_SQL_COLUMN_OFFSETS = {7, 8, 9, 10, 11, 12, 13, 15}
 
 
 def to_plain_text(value):
@@ -83,6 +88,44 @@ def _resolve_sheet_archive_path(zip_file, sheet_name):
     raise RuntimeError(f"Worksheet relationship for '{sheet_name}' was not found.")
 
 
+def _resolve_calc_chain_paths(zip_file):
+    """Return calcChain archive paths referenced by workbook relationships."""
+    calc_chain_paths = set()
+
+    try:
+        relationships_root = ET.fromstring(zip_file.read("xl/_rels/workbook.xml.rels"))
+    except KeyError:
+        return calc_chain_paths
+
+    for relationship in relationships_root.findall(f"{{{PKG_REL_NS}}}Relationship"):
+        if relationship.get("Type") != CALC_CHAIN_REL_TYPE:
+            continue
+
+        target = (relationship.get("Target") or "").strip()
+        if not target:
+            continue
+
+        if target.startswith("/"):
+            calc_chain_paths.add(target.lstrip("/"))
+        else:
+            calc_chain_paths.add(f"xl/{target.lstrip('/')}")
+
+    # Common default path when workbook relationship is malformed/missing.
+    calc_chain_paths.add("xl/calcChain.xml")
+    return calc_chain_paths
+
+
+def _remove_calc_chain_relationships(rels_xml_bytes):
+    """Remove calcChain relationships from workbook rels XML bytes."""
+    root = ET.fromstring(rels_xml_bytes)
+
+    for relationship in list(root.findall(f"{{{PKG_REL_NS}}}Relationship")):
+        if relationship.get("Type") == CALC_CHAIN_REL_TYPE:
+            root.remove(relationship)
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def _find_or_create_row(sheet_data, row_index):
     """Return existing row element or insert a new one in sorted position."""
     row_tag = f"{{{XML_NS}}}row"
@@ -138,6 +181,48 @@ def _set_cell_plain_text(cell, text):
     text_node = ET.SubElement(is_node, f"{{{XML_NS}}}t")
     text_node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
     text_node.text = text
+
+
+def _coerce_number_text(value):
+    """Return canonical numeric text for OOXML <v>, or None when non-numeric."""
+    if value is None or pd.isna(value):
+        return None
+
+    if isinstance(value, bool):
+        return "1" if value else "0"
+
+    if isinstance(value, (int, float)):
+        number_text = format(value, ".15g")
+    else:
+        cleaned = str(value).strip().replace(",", "").replace("$", "")
+        if not cleaned:
+            return None
+        try:
+            number_text = format(Decimal(cleaned), "f")
+        except (InvalidOperation, ValueError):
+            return None
+
+    if "." in number_text:
+        number_text = number_text.rstrip("0").rstrip(".")
+
+    return number_text or "0"
+
+
+def _set_cell_number(cell, value):
+    """Replace cell contents with a numeric value node when parseable."""
+    number_text = _coerce_number_text(value)
+    if number_text is None:
+        _set_cell_plain_text(cell, "")
+        return
+
+    for child in list(cell):
+        cell.remove(child)
+
+    if "t" in cell.attrib:
+        del cell.attrib["t"]
+
+    value_node = ET.SubElement(cell, f"{{{XML_NS}}}v")
+    value_node.text = number_text
 
 
 def restore_ignorable_namespace_declarations(xml_bytes):
@@ -218,6 +303,7 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
 
     with zipfile.ZipFile(source_workbook_path, "r") as source_zip:
         sheet_archive_path = _resolve_sheet_archive_path(source_zip, sheet_name)
+        calc_chain_paths = _resolve_calc_chain_paths(source_zip)
         sheet_root = ET.fromstring(source_zip.read(sheet_archive_path))
         sheet_data = sheet_root.find(f"{{{XML_NS}}}sheetData")
 
@@ -241,7 +327,11 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
             for col_offset, col_name in enumerate(sql_main_export_columns):
                 col_idx = start_col + col_offset
                 cell = _find_or_create_cell(row_element, row_idx, col_idx)
-                _set_cell_plain_text(cell, to_plain_text(sql_row.get(col_name, "")))
+                value = sql_row.get(col_name, "")
+                if col_offset in NUMERIC_SQL_COLUMN_OFFSETS:
+                    _set_cell_number(cell, value)
+                else:
+                    _set_cell_plain_text(cell, to_plain_text(value))
 
         updated_sheet_xml = ET.tostring(
             sheet_root,
@@ -256,8 +346,16 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
         try:
             with zipfile.ZipFile(temp_path, "w") as target_zip:
                 for zip_info in source_zip.infolist():
+                    if zip_info.filename in calc_chain_paths:
+                        continue
+
                     if zip_info.filename == sheet_archive_path:
                         target_zip.writestr(zip_info, updated_sheet_xml)
+                    elif zip_info.filename == "xl/_rels/workbook.xml.rels":
+                        updated_rels_xml = _remove_calc_chain_relationships(
+                            source_zip.read(zip_info.filename)
+                        )
+                        target_zip.writestr(zip_info, updated_rels_xml)
                     else:
                         target_zip.writestr(zip_info, source_zip.read(zip_info.filename))
             shutil.move(temp_path, source_workbook_path)
