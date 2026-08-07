@@ -43,10 +43,6 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Automated reporting and distribution
 - Power BI data publication pipeline
 
-## Considerations
-
-- Current greedy architecture encounters edge cases and multi-department optimization constraints. A design review for staged optimization (mold first, then melt) is still needed.
-
 ---
 
 ## Current Structure
