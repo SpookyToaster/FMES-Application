@@ -1,13 +1,13 @@
-# Production Scheduler
+# Foundry Management and Execution System (FMES)
 
 **Author:** Logan Burkardt  
-**Last Updated:** August 6, 2026
+**Last Updated:** August 7, 2026
 
 ---
 
 ## Overview
 
-Production Scheduler is a Python-based mold scheduling tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports a formatted mold schedule workbook.
+Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports formatted schedule workbooks.
 
 The program now uses a modular layout instead of a single monolithic script. [Main.py](Main.py) is the operational entrypoint, while [Scheduler.py](Scheduler.py) provides orchestration logic and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
@@ -28,11 +28,14 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Callable dashboard query methods in [DB_IO.py](DB_IO.py) for Orders and Main report datasets
 - Main dashboard SQL mapping aligned to direct-source policy for molds/cores/pour fields (no cross-field derivations)
 - Production SQL report script in [Production_Report_Queries.sql](Production_Report_Queries.sql)
+- Alloy compatibility reference CSV scaffolded at `Quality\Schedule\compatibleAlloys\alloy_compatibility.csv`
+- Scheduler input loader now attaches compatibility metadata columns from alloy CSV (`Compatibility Group`, `Compatibility Family`)
 
 ### In Progress
 
 - SQL Server integration beyond reporting reads (write-back schedule persistence)
 - Persistent schedule state between runs
+- Melt-first planning redesign so molding and heat schedules are planned together
 
 ### Not Started
 
@@ -105,6 +108,27 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Assigns each schedule row to days while respecting line/floor per-job daily limits (6/3), and allows an extension to span multiple days when needed.
 - Assigns per-day heat numbers based on alloy continuity and 2300 lb maximum per heat.
 
+### Planning Direction (Draft)
+
+- Shift from mold-only greedy planning to melt-first planning with mold backfill.
+- Daily heat policy target is 5 planned heats plus 1 reserved placeholder heat for remakes, drop-ins, and late substitutions.
+- Extensions remain the core planning unit and should stay intact through heat grouping whenever possible.
+- Alloy co-pour decisions are moving to a reference-data model instead of hardcoded alloy checks.
+
+### Alloy Compatibility Reference Data
+
+- Source file: `C:\Users\lburkardt\OneDrive - MonettMetalsUS1\Quality\Schedule\compatibleAlloys\alloy_compatibility.csv`
+- Current columns:
+        - `alloy_code`
+        - `compatibility_group`
+        - `family_tag`
+        - `is_active`
+        - `source_rule`
+        - `notes`
+- Seed rules currently included:
+        - `WCC` and `WCB` share A216 compatibility group.
+        - `130-115` is seeded under a `70-30` family tag/group A148 for future related alloys.
+
 ### Export Output
 
 - Builds daily schedule blocks.
@@ -140,6 +164,9 @@ Open Order Report.xlsx
         │
         ▼
 Read_File()
+        │
+        ▼
+Apply Alloy Compatibility Mapping
         │
         ▼
 Mold_Scheduler()
@@ -274,7 +301,7 @@ Planned next steps still align with the roadmap:
 - historical schedule analysis
 - automated reporting and notifications
 
-## Production Scheduler Evolution Plan
+## FMES Evolution Plan
 
 ## Guiding Principle
 

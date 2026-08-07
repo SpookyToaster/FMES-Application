@@ -1,5 +1,5 @@
 """
-Historical snapshot loader for the mold production scheduler.
+Historical snapshot loader for Foundry Management and Execution System (FMES).
 
 Reads a combined ERP export CSV and loads it into the SQL Server history
 tables used for reporting and trend analysis.

@@ -1,5 +1,5 @@
 """
-Application entrypoint for the production scheduler.
+Application entrypoint for Foundry Management and Execution System (FMES).
 
 Main.py provides one command that runs the full end-to-end flow:
   1) Validate DB settings when SQL source is used.
@@ -30,7 +30,7 @@ DEFAULT_HEAT_OUTPUT = (
 def parse_args():
     """Parse CLI args for source/run control and output locations."""
     parser = argparse.ArgumentParser(
-        description="Run full scheduler workflow from DB/Excel source through export."
+        description="Run full FMES workflow from DB/Excel source through export."
     )
     parser.add_argument(
         "--source",

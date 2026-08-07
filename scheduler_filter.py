@@ -1,5 +1,5 @@
 """
-Job filtering logic for the mold production scheduler.
+Job filtering logic for Foundry Management and Execution System (FMES).
 
 Filters the raw Open Order Report down to only the jobs that should be
 scheduled for mold production on the upcoming days.

@@ -1,5 +1,5 @@
 """
-File I/O helpers for the mold production scheduler.
+File I/O helpers for Foundry Management and Execution System (FMES).
 
 Currently handles reading the Open Order Report Excel workbook that is
 exported from the ERP system and placed in the shared OneDrive folder.
@@ -39,6 +39,11 @@ DEFAULT_DB_SNAPSHOT_DIR = (
     r"\Quality\Schedule\Historical DB Snapshots"
 )
 
+DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH = (
+    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
+    r"\Quality\Schedule\compatibleAlloys\alloy_compatibility.csv"
+)
+
 SQL_MAIN_EXPORT_COLUMNS = [
     "Due Date",
     "Customer Name",
@@ -73,6 +78,8 @@ REQUIRED_SQL_TEXT_COLUMNS = [
     "Part Number",
     "Job Number",
 ]
+ALLOY_COMPATIBILITY_GROUP_COLUMN = "Compatibility Group"
+ALLOY_COMPATIBILITY_FAMILY_COLUMN = "Compatibility Family"
 
 
 def _ensure_directory(path):
@@ -483,6 +490,86 @@ def _coerce_numeric(series_like):
     return pd.to_numeric(series_like, errors="coerce").fillna(0)
 
 
+def _normalize_alloy_key(value):
+    """Return normalized alloy key for lookup operations."""
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _load_alloy_compatibility_map(
+    csv_path=DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
+):
+    """Load alloy compatibility metadata keyed by alloy_code from CSV."""
+    try:
+        frame = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to read alloy compatibility CSV from {csv_path}"
+        ) from exc
+
+    if frame.empty:
+        return {}
+
+    frame.columns = [str(col).strip() for col in frame.columns]
+    required = {"alloy_code", "compatibility_group", "family_tag", "is_active"}
+    missing = [col for col in required if col not in frame.columns]
+    if missing:
+        raise RuntimeError(
+            "Alloy compatibility CSV is missing required columns: "
+            + ", ".join(sorted(missing))
+        )
+
+    active = frame["is_active"].astype(str).str.strip().str.upper().isin({"Y", "YES", "TRUE", "1"})
+    active_rows = frame[active]
+
+    compatibility_map = {}
+    for _, row in active_rows.iterrows():
+        alloy_code = _normalize_alloy_key(row.get("alloy_code"))
+        if not alloy_code:
+            continue
+
+        compatibility_group = str(row.get("compatibility_group", "")).strip()
+        family_tag = str(row.get("family_tag", "")).strip()
+        compatibility_map[alloy_code] = {
+            ALLOY_COMPATIBILITY_GROUP_COLUMN: compatibility_group or alloy_code,
+            ALLOY_COMPATIBILITY_FAMILY_COLUMN: family_tag,
+        }
+
+    return compatibility_map
+
+
+def _apply_alloy_compatibility(frame, compatibility_map):
+    """Attach compatibility group/family columns based on Alloy values."""
+    if frame.empty:
+        frame[ALLOY_COMPATIBILITY_GROUP_COLUMN] = ""
+        frame[ALLOY_COMPATIBILITY_FAMILY_COLUMN] = ""
+        return frame
+
+    frame = frame.copy()
+
+    alloy_series = frame.get(Columns.COL_ALLOY, pd.Series([""] * len(frame), index=frame.index))
+    alloy_keys = alloy_series.apply(_normalize_alloy_key)
+
+    def resolve_group(key):
+        metadata = compatibility_map.get(key)
+        if metadata:
+            return metadata[ALLOY_COMPATIBILITY_GROUP_COLUMN]
+        return key
+
+    def resolve_family(key):
+        metadata = compatibility_map.get(key)
+        if metadata:
+            return metadata[ALLOY_COMPATIBILITY_FAMILY_COLUMN]
+        return ""
+
+    frame[ALLOY_COMPATIBILITY_GROUP_COLUMN] = alloy_keys.apply(resolve_group)
+    frame[ALLOY_COMPATIBILITY_FAMILY_COLUMN] = alloy_keys.apply(resolve_family)
+    return frame
+
+
 def _normalize_sql_rows(raw_rows):
     """
     Normalize SQL dashboard rows into the schema expected by the scheduler.
@@ -545,6 +632,7 @@ def Read_File(
     run_id=None,
     start_due_date=None,
     end_due_date=None,
+    alloy_compatibility_csv_path=DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
 ):
     """
     Read scheduler input from either Excel or SQL and return it as a DataFrame.
@@ -566,10 +654,12 @@ def Read_File(
         RuntimeError: If source read fails or source is invalid.
     """
     try:
+        compatibility_map = _load_alloy_compatibility_map(alloy_compatibility_csv_path)
+
         if source == "excel":
             imported_file = pd.read_excel(filepath, sheet_name="OOR")
             imported_file.columns = imported_file.columns.str.strip()
-            return imported_file
+            return _apply_alloy_compatibility(imported_file, compatibility_map)
 
         if source == "sql":
             raw_rows = get_main_dashboard_rows(
@@ -579,7 +669,8 @@ def Read_File(
             )
             raw_rows = _exclude_rows_by_customer_name(raw_rows)
             raw_rows = _validate_sql_rows(raw_rows)
-            return _normalize_sql_rows(raw_rows)
+            normalized = _normalize_sql_rows(raw_rows)
+            return _apply_alloy_compatibility(normalized, compatibility_map)
 
         raise RuntimeError(f"Unsupported input source '{source}'. Use 'excel' or 'sql'.")
     except Exception as exc:

@@ -1,5 +1,5 @@
 """
-Export logic for the mold production scheduler.
+Export logic for Foundry Management and Execution System (FMES).
 
 Builds structured export blocks from daily schedules and writes two output
 workbooks:

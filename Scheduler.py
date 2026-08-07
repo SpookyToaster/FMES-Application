@@ -1,5 +1,5 @@
 """
-Mold production scheduler entry point.
+FMES scheduling entry point.
 
 Orchestrates the full scheduling pipeline:
   1. Read the Open Order Report from Excel.

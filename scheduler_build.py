@@ -1,5 +1,5 @@
 """
-Schedule-building logic for the mold production scheduler.
+Schedule-building logic for Foundry Management and Execution System (FMES).
 
 Responsibilities:
   - Split individual jobs into extension-sized work chunks (Expand_Job).

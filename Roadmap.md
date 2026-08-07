@@ -1,10 +1,10 @@
-# Roadmap
+# FMES Roadmap
 
-**Last Updated:** August 6, 2026
+**Last Updated:** August 7, 2026
 
 ## Vision
 
-The long-term goal is to evolve this application from a spreadsheet-based mold scheduler into a production planning and visibility platform.
+The long-term goal is to evolve Foundry Management and Execution System (FMES) from a spreadsheet-based mold scheduler into a production planning and visibility platform.
 
 ### Objectives
 
@@ -45,6 +45,7 @@ Production conditions will change daily. The system should adapt rather than att
 - DB metadata discovery and dashboard data access methods implemented in [DB_IO.py](DB_IO.py)
 - Production-ready dashboard SQL query pack added in [Production_Report_Queries.sql](Production_Report_Queries.sql)
 - Main dashboard SQL mapping aligned to direct-source output policy for molds/cores/pour fields (manual derivations remain in Excel workflow)
+- Alloy compatibility master-data seed file created (`compatibleAlloys/alloy_compatibility.csv`) with scheduler-side CSV loader integration
 
 ### In Progress
 
@@ -52,6 +53,7 @@ Production conditions will change daily. The system should adapt rather than att
 - Error handling is present across scheduling and DB entrypoints, with room for centralized logging
 - Schedule persistence model is still not in use for run-to-run carryforward
 - Build and release process hardening is in progress (`build_scheduler.ps1` now writes PyInstaller output to local AppData paths to avoid Windows/OneDrive lock conflicts)
+- Planning model redesign in progress: melt-first with mold backfill, plus a 5+1 daily heat slot policy
 
 ### Open Gaps
 
@@ -161,8 +163,14 @@ LastModified
 
 ### Melt WIP Schedule
 
-- Build melt scheduling logic
+- Build melt scheduling logic with fixed daily slots (5 planned heats + 1 reserved contingency heat)
 - Track melt work-in-progress
+
+### Alloy Chemistry Compatibility
+
+- Use CSV master data (not hardcoded conditions) to define co-pour compatibility groups.
+- Keep compatibility immutable by default, with controlled additive updates as new alloys are introduced.
+- Validate unmapped alloys into an exception path to avoid silent pour-mix errors.
 
 ### Casting & Cleaning WIP Schedule
 
@@ -229,6 +237,6 @@ LastModified
 
 ## Next 3 Priorities
 
-1. Add SQL Server schedule run-state tables and write path for each scheduler execution.
+1. Implement a melt-first day planner (5 planned heats + 1 reserved contingency slot) and backfill required molding by day.
 2. Preserve prior run assignments to reduce schedule churn between runs.
-3. Wire [DB_IO.py](DB_IO.py) dashboard methods into scheduled exports/distribution, add structured logging, and formalize repeatable packaging steps.
+3. Expand CSV-driven alloy compatibility handling (group validation, unknown-alloy exceptions, and planner integration).

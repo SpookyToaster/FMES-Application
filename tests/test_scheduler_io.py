@@ -39,7 +39,9 @@ class SchedulerIOTests(unittest.TestCase):
         with patch("scheduler_io.pd.read_excel", return_value=frame):
             result = Read_File("sample.xlsx")
 
-        self.assertEqual(list(result.columns), ["Job Number", "Due Date"])
+        self.assertEqual(list(result.columns)[:2], ["Job Number", "Due Date"])
+        self.assertIn("Compatibility Group", result.columns)
+        self.assertIn("Compatibility Family", result.columns)
 
     def test_read_file_wraps_failures(self):
         with patch("scheduler_io.pd.read_excel", side_effect=FileNotFoundError("missing")):
@@ -176,6 +178,64 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["Job Number"], "VUPN")
         self.assertEqual(frame.iloc[0]["Alloy"], "")
+
+    def test_read_file_sql_applies_alloy_compatibility_columns(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer A",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "WCB",
+                "Casting Type": "L",
+                "Quantity of Molds": 5,
+                "Molds Completed": 1,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+            },
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer B",
+                "Part Number": "P2",
+                "Job Type": "JOB",
+                "Job Number": "9002",
+                "Alloy": "4140",
+                "Casting Type": "L",
+                "Quantity of Molds": 6,
+                "Molds Completed": 2,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 120,
+            },
+        ]
+
+        compatibility_frame = pd.DataFrame(
+            [
+                {
+                    "alloy_code": "WCB",
+                    "compatibility_group": "A216",
+                    "family_tag": "",
+                    "is_active": "Y",
+                },
+                {
+                    "alloy_code": "4140",
+                    "compatibility_group": "A148",
+                    "family_tag": "",
+                    "is_active": "Y",
+                },
+            ]
+        )
+
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows), patch(
+            "scheduler_io.pd.read_csv", return_value=compatibility_frame
+        ):
+            frame = Read_File(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Compatibility Group"], "A216")
+        self.assertEqual(frame.iloc[1]["Compatibility Group"], "A148")
+        self.assertIn("Compatibility Family", frame.columns)
 
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
