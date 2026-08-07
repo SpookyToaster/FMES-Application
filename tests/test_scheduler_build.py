@@ -166,6 +166,35 @@ class SchedulerBuildTests(unittest.TestCase):
         self.assertIn("Heat #", day1.columns)
         self.assertEqual(day1["Heat #"].tolist(), [1, 1, 2, 3, 4, 4])
 
+    def test_daily_schedules_group_compatible_astm_alloys_together(self):
+        schedule_df = pd.DataFrame([
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8101",
+                Columns.COL_ALLOY: "80-40",
+                "Compatibility Group": "A148",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 800,
+                "Molds for EXT": 2,
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "8102",
+                Columns.COL_ALLOY: "150-135",
+                "Compatibility Group": "A148",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 900,
+                "Molds for EXT": 2,
+            },
+        ])
+
+        daily_schedules = Build_Daily_Schedules(schedule_df)
+        day1 = daily_schedules[1]
+
+        self.assertEqual(day1["Heat #"].tolist(), [1, 1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,11 +17,11 @@ from datetime import timedelta
 import pandas as pd
 
 from config import Columns, DailyMoldLimits
+from melt_planning import HEAT_WEIGHT_LIMIT_LBS, assign_heat_numbers
 
 
 EXTENSION_WEIGHT_LIMIT_LBS = 2300
 EXTENSION_MOLD_LIMIT = 10
-HEAT_WEIGHT_LIMIT_LBS = 2300
 _EXTENSION_ALPHABET = [ch for ch in string.ascii_uppercase if ch != "L"]
 
 
@@ -348,40 +348,6 @@ def Build_Daily_Schedules(Schedule_Data_Frame):
         dict mapping day number (int) -> DataFrame with a 'Heat #' column added.
     """
     try:
-        def assign_heat_numbers(day_df):
-            if day_df.empty:
-                day_df["Heat #"] = []
-                return day_df
-
-            heat_numbers = []
-            heat_number = 0
-            current_alloy = None
-            current_heat_weight = 0.0
-
-            for _, row in day_df.iterrows():
-                alloy = str(row.get(Columns.COL_ALLOY, "") or "")
-                row_weight = float(row.get("Total Weight per EXT", 0) or 0)
-                row_weight = max(row_weight, 0)
-
-                needs_new_heat = False
-
-                if alloy != current_alloy:
-                    needs_new_heat = True
-                elif current_heat_weight + row_weight > HEAT_WEIGHT_LIMIT_LBS:
-                    needs_new_heat = True
-
-                if needs_new_heat:
-                    heat_number += 1
-                    current_alloy = alloy
-                    current_heat_weight = 0.0
-
-                current_heat_weight += row_weight
-                heat_numbers.append(heat_number)
-
-            day_df = day_df.copy()
-            day_df["Heat #"] = heat_numbers
-            return day_df
-
         daily_schedules = {}
 
         for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):

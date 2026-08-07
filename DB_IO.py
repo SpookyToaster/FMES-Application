@@ -1,9 +1,9 @@
 """Database input/output functions."""
 
-from datetime import datetime
 from pathlib import Path
 
 from Database import connect
+from scheduler_validation import append_missing_job_id_audit
 
 
 MISSING_JOB_ID_LOG_DIR = Path(
@@ -370,91 +370,6 @@ def _history_tables_available(cursor):
     return _table_exists(cursor, "SchedulerRun") and _table_exists(cursor, "OrderSnapshot")
 
 
-def _append_missing_job_id_audit(cursor, source_label):
-    """Append a timestamped audit block for open-order rows missing job IDs."""
-    cursor.execute(
-        """
-        SELECT COUNT(*)
-        FROM dbo.OEDetail d
-        INNER JOIN dbo.OEHEader h
-            ON h.ORDERNUMBER = d.ORDERNUMBER
-        WHERE NULLIF(
-            LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))),
-            ''
-        ) IS NULL;
-        """
-    )
-    missing_count = int(cursor.fetchone()[0])
-
-    cursor.execute(
-        """
-        SELECT TOP (10)
-            h.ORDERNUMBER AS OrderNumber,
-            d.LINENUMBER AS LineNumber,
-            h.CUSTOMERNAME AS CustomerName,
-            d.PRODUCTNUMBER AS PartNumber,
-            d.JOBNUMBER AS DetailJobNumber,
-            h.JOBNUMBER AS HeaderJobNumber
-        FROM dbo.OEDetail d
-        INNER JOIN dbo.OEHEader h
-            ON h.ORDERNUMBER = d.ORDERNUMBER
-        WHERE NULLIF(
-            LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))),
-            ''
-        ) IS NULL
-        ORDER BY h.ORDERNUMBER, d.LINENUMBER;
-        """
-    )
-    sample_rows = cursor.fetchall()
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    separator = "=" * 90
-    lines = [
-        separator,
-        f"Missing Job ID Audit | {timestamp}",
-        f"Source: {source_label}",
-        f"Rows removed by strict Job Number rule: {missing_count}",
-    ]
-
-    if sample_rows:
-        lines.append("Sample rows (top 10):")
-        for row in sample_rows:
-            lines.append(
-                "  "
-                f"Order={row[0]} | Line={row[1]} | Customer={row[2]} | Part={row[3]} "
-                f"| DetailJob={row[4]} | HeaderJob={row[5]}"
-            )
-    else:
-        lines.append("Sample rows: none")
-
-    lines.append("")
-    log_path = _current_missing_job_id_log_path()
-    _prune_missing_job_id_logs(MISSING_JOB_ID_LOG_RETENTION_FILES)
-    with log_path.open("a", encoding="utf-8") as log_file:
-        log_file.write("\n".join(lines))
-
-
-def _current_missing_job_id_log_path():
-    """Return the monthly audit log path for missing job ID removals."""
-    MISSING_JOB_ID_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    month_stamp = datetime.now().strftime("%Y-%m")
-    return MISSING_JOB_ID_LOG_DIR / f"{MISSING_JOB_ID_LOG_PREFIX}_{month_stamp}.log"
-
-
-def _prune_missing_job_id_logs(max_files):
-    """Keep only the newest monthly log files to cap long-term disk growth."""
-    if max_files <= 0:
-        return
-
-    log_files = sorted(MISSING_JOB_ID_LOG_DIR.glob(f"{MISSING_JOB_ID_LOG_PREFIX}_*.log"))
-    overflow = len(log_files) - max_files
-    if overflow <= 0:
-        return
-
-    for old_log in log_files[:overflow]:
-        old_log.unlink(missing_ok=True)
-
-
 def get_orders_dashboard_rows(start_date=None, end_date=None):
     """
     Return orders dashboard rows from OE header/detail tables.
@@ -506,10 +421,10 @@ def get_main_dashboard_rows(run_id=None, start_due_date=None, end_due_date=None)
             except Exception:
                 # If history schema exists but query cannot execute, keep the app
                 # usable by falling back to live report tables.
-                _append_missing_job_id_audit(cursor, "live_fallback")
+                append_missing_job_id_audit(cursor, "live_fallback")
                 cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
         else:
-            _append_missing_job_id_audit(cursor, "live")
+            append_missing_job_id_audit(cursor, "live")
             cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
 
         rows = cursor.fetchall()
