@@ -41,7 +41,8 @@ class SchedulerIOTests(unittest.TestCase):
 
         self.assertEqual(list(result.columns)[:2], ["Job Number", "Due Date"])
         self.assertIn("Compatibility Group", result.columns)
-        self.assertIn("Compatibility Family", result.columns)
+        self.assertIn("Compatible With ASTM Group", result.columns)
+        self.assertIn("Specific Compatible Alloys", result.columns)
 
     def test_read_file_wraps_failures(self):
         with patch("scheduler_io.pd.read_excel", side_effect=FileNotFoundError("missing")):
@@ -216,14 +217,12 @@ class SchedulerIOTests(unittest.TestCase):
                 {
                     "alloy_code": "WCB",
                     "compatibility_group": "A216",
-                    "family_tag": "",
-                    "is_active": "Y",
+                    "Is_Compat_with_All": "YES",
                 },
                 {
                     "alloy_code": "4140",
-                    "compatibility_group": "A148",
-                    "family_tag": "",
-                    "is_active": "Y",
+                    "compatibility_group": "4140",
+                    "Is_Compat_with_All": "NO",
                 },
             ]
         )
@@ -234,8 +233,69 @@ class SchedulerIOTests(unittest.TestCase):
             frame = Read_File(source="sql")
 
         self.assertEqual(frame.iloc[0]["Compatibility Group"], "A216")
-        self.assertEqual(frame.iloc[1]["Compatibility Group"], "A148")
-        self.assertIn("Compatibility Family", frame.columns)
+        self.assertEqual(frame.iloc[0]["Compatible With ASTM Group"], "YES")
+        self.assertEqual(frame.iloc[1]["Compatibility Group"], "4140")
+        self.assertEqual(frame.iloc[1]["Compatible With ASTM Group"], "NO")
+        self.assertIn("Specific Compatible Alloys", frame.columns)
+
+    def test_read_file_sql_preserves_specific_directional_compatibility(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer A",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "CF8M",
+                "Casting Type": "L",
+                "Quantity of Molds": 5,
+                "Molds Completed": 1,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+            },
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer B",
+                "Part Number": "P2",
+                "Job Type": "JOB",
+                "Job Number": "9002",
+                "Alloy": "CF3M",
+                "Casting Type": "L",
+                "Quantity of Molds": 6,
+                "Molds Completed": 2,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 120,
+            },
+        ]
+
+        compatibility_frame = pd.DataFrame(
+            [
+                {
+                    "alloy_code": "CF8M",
+                    "compatibility_group": "A351",
+                    "Is_Compat_with_All": "NO",
+                    "compatible_specific_alloys": "CF3M",
+                },
+                {
+                    "alloy_code": "CF3M",
+                    "compatibility_group": "A351",
+                    "Is_Compat_with_All": "NO",
+                    "compatible_specific_alloys": "",
+                },
+            ]
+        )
+
+        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows), patch(
+            "scheduler_io.pd.read_csv", return_value=compatibility_frame
+        ):
+            frame = Read_File(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Compatibility Group"], "A351")
+        self.assertEqual(frame.iloc[0]["Specific Compatible Alloys"], "CF3M")
+        self.assertEqual(frame.iloc[1]["Compatibility Group"], "A351")
+        self.assertEqual(frame.iloc[1]["Specific Compatible Alloys"], "")
 
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
