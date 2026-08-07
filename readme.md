@@ -215,6 +215,14 @@ Build the executable from the project root with:
 
 That script writes PyInstaller work/dist output to a local path under `%LOCALAPPDATA%\SchedulerProgram\PyInstaller`, which avoids OneDrive lock conflicts and removes the need to manage build folders manually.
 
+To label a build, pass a version string or release tag:
+
+```powershell
+.\build_scheduler.ps1 -VersionLabel 1.0.0
+```
+
+That produces a versioned release folder plus a copy named like `Scheduler_1.0.0.exe`, along with a `build-info.txt` file for traceability.
+
 If you need to run PyInstaller directly, use a fresh work/dist path each time:
 
 ```powershell
