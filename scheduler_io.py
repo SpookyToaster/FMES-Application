@@ -644,6 +644,50 @@ def _apply_alloy_compatibility(frame, compatibility_map):
     return frame
 
 
+def Can_Alloy_Share_Heat_With(
+    anchor_alloy,
+    candidate_alloy,
+    compatibility_map=None,
+    csv_path=DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
+):
+    """
+    Return True when candidate_alloy can be poured into a heat anchored by anchor_alloy.
+
+    The rule is directional so stricter alloys can accept looser alloys without
+    implying the reverse is also valid.
+    """
+    anchor_key = _normalize_alloy_key(anchor_alloy)
+    candidate_key = _normalize_alloy_key(candidate_alloy)
+
+    if not anchor_key or not candidate_key:
+        return anchor_key == candidate_key and bool(anchor_key)
+
+    if anchor_key == candidate_key:
+        return True
+
+    compatibility_map = compatibility_map or _load_alloy_compatibility_map(csv_path)
+    anchor_metadata = compatibility_map.get(anchor_key)
+    candidate_metadata = compatibility_map.get(candidate_key)
+
+    if not anchor_metadata or not candidate_metadata:
+        return False
+
+    anchor_group = anchor_metadata.get(ALLOY_COMPATIBILITY_GROUP_COLUMN, "")
+    candidate_group = candidate_metadata.get(ALLOY_COMPATIBILITY_GROUP_COLUMN, "")
+    if not anchor_group or anchor_group != candidate_group:
+        return False
+
+    if anchor_metadata.get(ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN) == "YES":
+        return True
+
+    specific_alloys = {
+        _normalize_alloy_key(value)
+        for value in str(anchor_metadata.get(ALLOY_COMPATIBILITY_SPECIFIC_COLUMN, "")).split(",")
+        if _normalize_alloy_key(value)
+    }
+    return candidate_key in specific_alloys
+
+
 def _normalize_sql_rows(raw_rows):
     """
     Normalize SQL dashboard rows into the schema expected by the scheduler.

@@ -10,6 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scheduler_io import (
+    Can_Alloy_Share_Heat_With,
     Read_File,
     SQL_MAIN_EXPORT_COLUMNS,
     Sync_Open_Order_Report_With_SQL,
@@ -296,6 +297,45 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["Specific Compatible Alloys"], "CF3M")
         self.assertEqual(frame.iloc[1]["Compatibility Group"], "A351")
         self.assertEqual(frame.iloc[1]["Specific Compatible Alloys"], "")
+
+    def test_can_alloy_share_heat_with_allows_groupwide_astm_compatibility(self):
+        compatibility_map = {
+            "80-40": {
+                "Compatibility Group": "A148",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+            },
+            "150-135": {
+                "Compatibility Group": "A148",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+            },
+        }
+
+        self.assertTrue(
+            Can_Alloy_Share_Heat_With("80-40", "150-135", compatibility_map=compatibility_map)
+        )
+
+    def test_can_alloy_share_heat_with_honors_directional_specific_compatibility(self):
+        compatibility_map = {
+            "CF3M": {
+                "Compatibility Group": "A351",
+                "Compatible With ASTM Group": "NO",
+                "Specific Compatible Alloys": "CF8M",
+            },
+            "CF8M": {
+                "Compatibility Group": "A351",
+                "Compatible With ASTM Group": "NO",
+                "Specific Compatible Alloys": "",
+            },
+        }
+
+        self.assertTrue(
+            Can_Alloy_Share_Heat_With("CF3M", "CF8M", compatibility_map=compatibility_map)
+        )
+        self.assertFalse(
+            Can_Alloy_Share_Heat_With("CF8M", "CF3M", compatibility_map=compatibility_map)
+        )
 
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
