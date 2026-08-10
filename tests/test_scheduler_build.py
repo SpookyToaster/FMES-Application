@@ -7,10 +7,23 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.config import Columns
-from fmes.scheduler_build import assign_days, assign_mold_days_from_heat_plan, build_daily_schedules, build_schedule_dates, build_schedule_rows, expand_job, get_extensions
+from fmes.scheduler_build import assign_days, assign_mold_days_from_heat_plan, build_daily_schedules, build_schedule_dates, build_schedule_rows, expand_job, get_extensions, is_f_job
 
 
 class SchedulerBuildTests(unittest.TestCase):
+    def test_heavy_line_jobs_stay_in_line_bucket(self):
+        heavy_line = pd.Series({
+            Columns.COL_CAST_TYPE: "L",
+            Columns.COL_POUR_WEIGHT: 900,
+        })
+        floor = pd.Series({
+            Columns.COL_CAST_TYPE: "F",
+            Columns.COL_POUR_WEIGHT: 100,
+        })
+
+        self.assertFalse(is_f_job(heavy_line))
+        self.assertTrue(is_f_job(floor))
+
     def test_get_extensions_and_expand_job(self):
         job = pd.Series({
             Columns.COL_JOB_NUMBER: "3001",
@@ -115,9 +128,12 @@ class SchedulerBuildTests(unittest.TestCase):
         assigned, day_offset = assign_mold_days_from_heat_plan(planned_rows)
         assigned = assigned.sort_values(by=["Schedule Day"]).reset_index(drop=True)
 
-        self.assertEqual(day_offset, 2)
+        self.assertEqual(day_offset, 0)
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [2, 6])
+        # Capacity could not fit all molds in one prior day, so the pour moved later.
+        self.assertEqual([int(v) for v in assigned["Pour Schedule Day"].unique().tolist()], [3])
+        self.assertEqual([int(v) for v in assigned["Original Pour Schedule Day"].unique().tolist()], [1])
 
     def test_partial_completion_and_multi_day_extensions_work_together(self):
         job = pd.Series({

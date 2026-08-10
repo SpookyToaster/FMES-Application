@@ -17,11 +17,12 @@ from datetime import timedelta
 import pandas as pd
 
 from .config import Columns, DailyMoldLimits
-from .melt_planning import HEAT_WEIGHT_LIMIT_LBS, assign_heat_numbers
+from .melt_planning import HEAT_WEIGHT_LIMIT_LBS, MAX_PLANNED_HEATS_PER_DAY, assign_heat_numbers
 
 
 EXTENSION_WEIGHT_LIMIT_LBS = 2300
 EXTENSION_MOLD_LIMIT = 10
+MAX_MOLD_SIT_DAYS = 3
 _EXTENSION_ALPHABET = [ch for ch in string.ascii_uppercase if ch != "L"]
 
 
@@ -232,10 +233,11 @@ def build_schedule_rows(jobs_to_schedule):
 
 
 def is_f_job(job):
-    """Return True if the job belongs in the floor (F) mold bucket."""
-    if job[Columns.COL_POUR_WEIGHT] > 300:
-        return True
+    """Return True if the job belongs in the floor (F) mold bucket.
 
+    Bucket assignment is by casting type only. Heavy line jobs keep their
+    3-molds-per-day job limit via get_daily_mold_limit but consume line capacity.
+    """
     return str(job[Columns.COL_CAST_TYPE]).upper() == "F"
 
 
@@ -315,24 +317,111 @@ def assign_days(schedule_df):
         raise RuntimeError("Failed while assigning schedule days") from exc
 
 
+def _heat_minimum_mold_days(heat_rows):
+    """Return the minimum molding days a heat needs under bucket and job caps."""
+    bucket_totals = {"L": 0, "F": 0}
+    job_totals = {}
+    job_limits = {}
+
+    for row in heat_rows:
+        molds = _safe_int(row.get("Molds for EXT", 0), default=0)
+        if molds <= 0:
+            continue
+        bucket = "F" if is_f_job(row) else "L"
+        job_key = (row[Columns.COL_JOB_NUMBER], bucket)
+        bucket_totals[bucket] += molds
+        job_totals[job_key] = job_totals.get(job_key, 0) + molds
+        job_limits[job_key] = get_daily_mold_limit(row)
+
+    days_needed = 1
+    if bucket_totals["L"] > 0:
+        days_needed = max(
+            days_needed,
+            math.ceil(bucket_totals["L"] / DailyMoldLimits.MAX_L_MOLDS_PER_DAY),
+        )
+    if bucket_totals["F"] > 0:
+        days_needed = max(
+            days_needed,
+            math.ceil(bucket_totals["F"] / DailyMoldLimits.MAX_F_MOLDS_PER_DAY),
+        )
+    for job_key, molds in job_totals.items():
+        days_needed = max(days_needed, math.ceil(molds / max(job_limits[job_key], 1)))
+
+    return days_needed
+
+
+def _try_place_heat_molds(heat_rows, pour_day, window_days_count, day_usage, job_usage):
+    """
+    Tentatively place a heat's molds in the days just before pour_day.
+
+    Returns a list of (day, row, molds) placements, or None when the window
+    cannot hold every mold in the heat.
+    """
+    window_days = list(range(max(1, pour_day - window_days_count), pour_day))
+    if not window_days:
+        return None
+
+    temp_day = {day: dict(day_usage.get(day, {"L": 0, "F": 0})) for day in window_days}
+    temp_job = {
+        day: {job: dict(buckets) for job, buckets in job_usage.get(day, {}).items()}
+        for day in window_days
+    }
+    placements = []
+
+    for row in heat_rows:
+        molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
+        if molds_remaining <= 0:
+            continue
+
+        bucket = "F" if is_f_job(row) else "L"
+        job_num = row[Columns.COL_JOB_NUMBER]
+        per_job_daily_limit = get_daily_mold_limit(row)
+        capacity = (
+            DailyMoldLimits.MAX_F_MOLDS_PER_DAY
+            if bucket == "F"
+            else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
+        )
+
+        # Fill the latest days first to minimize how long molds sit before pour.
+        for day in reversed(window_days):
+            if molds_remaining <= 0:
+                break
+            job_buckets = temp_job[day].setdefault(job_num, {"L": 0, "F": 0})
+            available = min(
+                capacity - temp_day[day][bucket],
+                per_job_daily_limit - job_buckets[bucket],
+            )
+            molds_for_day = min(molds_remaining, max(available, 0))
+            if molds_for_day > 0:
+                placements.append((day, row, molds_for_day))
+                temp_day[day][bucket] += molds_for_day
+                job_buckets[bucket] += molds_for_day
+                molds_remaining -= molds_for_day
+
+        if molds_remaining > 0:
+            return None
+
+    return placements
+
+
 def assign_mold_days_from_heat_plan(planned_rows):
     """
     Back-fill molding days from an authoritative heat plan.
 
-    Pour days remain fixed. Mold capacity only determines how early molding must
-    begin to support those planned pours.
+    Heats keep their planned grouping and order. Each heat's molds are placed
+    on the days immediately before its pour so molds never sit longer than
+    MAX_MOLD_SIT_DAYS days (unless a single heat physically needs more days).
+    When nearby mold capacity is full, the pour day is pushed later (planning
+    further ahead) instead of molding earlier.
 
     Returns:
-        tuple[pd.DataFrame, int]: allocated mold rows and the day offset applied
-        so the earliest mold day becomes 1.
+        tuple[pd.DataFrame, int]: allocated mold rows carrying the final
+        'Pour Schedule Day' plus 'Original Pour Schedule Day', and a day
+        offset (always 0 because mold days never start before day 1).
     """
     try:
         if planned_rows.empty:
             return pd.DataFrame(), 0
-
-        day_usage = {}
-        job_usage = {}
-        allocated_rows = []
 
         planned_rows = planned_rows.copy().sort_values(
             by=[
@@ -347,62 +436,55 @@ def assign_mold_days_from_heat_plan(planned_rows):
             na_position="last",
         )
 
-        for _, row in planned_rows.iterrows():
-            molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
-            if molds_remaining <= 0:
-                continue
+        day_usage = {}
+        job_usage = {}
+        pours_per_day = {}
+        allocated_rows = []
+        last_pour_day = 0
 
-            bucket = "F" if is_f_job(row) else "L"
-            job_num = row[Columns.COL_JOB_NUMBER]
-            per_job_daily_limit = get_daily_mold_limit(row)
-            day = _safe_int(row.get("Pour Schedule Day", 1), default=1) - 1
+        for (original_pour_day, heat_number), heat_df in planned_rows.groupby(
+            ["Pour Schedule Day", "Heat #"], sort=True
+        ):
+            heat_rows = [row for _, row in heat_df.iterrows()]
+            window_days_count = max(MAX_MOLD_SIT_DAYS, _heat_minimum_mold_days(heat_rows))
 
-            while molds_remaining > 0:
-                if day not in day_usage:
-                    day_usage[day] = {"L": 0, "F": 0}
-                if day not in job_usage:
-                    job_usage[day] = {}
-                if job_num not in job_usage[day]:
-                    job_usage[day][job_num] = {"L": 0, "F": 0}
-
-                capacity = (
-                    DailyMoldLimits.MAX_F_MOLDS_PER_DAY
-                    if bucket == "F"
-                    else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
+            pour_day = max(_safe_int(original_pour_day, default=1), last_pour_day, 2)
+            placements = None
+            for _ in range(3660):  # hard stop so a bad input cannot loop forever
+                if pours_per_day.get(pour_day, 0) >= MAX_PLANNED_HEATS_PER_DAY:
+                    pour_day += 1
+                    continue
+                placements = _try_place_heat_molds(
+                    heat_rows, pour_day, window_days_count, day_usage, job_usage
                 )
-                available_day_capacity = capacity - day_usage[day][bucket]
-                available_job_capacity = per_job_daily_limit - job_usage[day][job_num][bucket]
-                molds_for_day = min(
-                    molds_remaining,
-                    available_day_capacity,
-                    available_job_capacity,
+                if placements is not None:
+                    break
+                pour_day += 1
+
+            if placements is None:
+                raise RuntimeError(
+                    f"Could not place molds for heat {heat_number} within the search horizon"
                 )
 
-                if molds_for_day > 0:
-                    row_for_day = row.copy()
-                    row_for_day["Molds for EXT"] = molds_for_day
-                    pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
-                    row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
-                    row_for_day["Schedule Day"] = day
-                    allocated_rows.append(row_for_day)
+            for day, row, molds_for_day in placements:
+                bucket = "F" if is_f_job(row) else "L"
+                job_num = row[Columns.COL_JOB_NUMBER]
+                day_usage.setdefault(day, {"L": 0, "F": 0})[bucket] += molds_for_day
+                job_usage.setdefault(day, {}).setdefault(job_num, {"L": 0, "F": 0})[bucket] += molds_for_day
 
-                    day_usage[day][bucket] += molds_for_day
-                    job_usage[day][job_num][bucket] += molds_for_day
-                    molds_remaining -= molds_for_day
+                row_for_day = row.copy()
+                row_for_day["Molds for EXT"] = molds_for_day
+                pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+                row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
+                row_for_day["Schedule Day"] = day
+                row_for_day["Original Pour Schedule Day"] = _safe_int(original_pour_day, default=1)
+                row_for_day["Pour Schedule Day"] = pour_day
+                allocated_rows.append(row_for_day)
 
-                if molds_remaining > 0:
-                    day -= 1
+            pours_per_day[pour_day] = pours_per_day.get(pour_day, 0) + 1
+            last_pour_day = pour_day
 
-        mold_schedule = pd.DataFrame(allocated_rows)
-        if mold_schedule.empty:
-            return mold_schedule, 0
-
-        min_day = int(mold_schedule["Schedule Day"].min())
-        day_offset = 1 - min_day if min_day < 1 else 0
-        if day_offset:
-            mold_schedule["Schedule Day"] = mold_schedule["Schedule Day"] + day_offset
-
-        return mold_schedule, day_offset
+        return pd.DataFrame(allocated_rows), 0
     except Exception as exc:
         raise RuntimeError("Failed while back-filling mold days from heat plan") from exc
 

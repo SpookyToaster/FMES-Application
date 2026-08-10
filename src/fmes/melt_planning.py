@@ -256,6 +256,102 @@ def shift_melt_schedule_days(melt_schedule, day_offset):
     return shifted
 
 
+def rebuild_melt_schedule_from_planned_rows(
+    allocated_rows,
+    max_planned_heats_per_day=MAX_PLANNED_HEATS_PER_DAY,
+    reserved_heat_slot_count=RESERVED_HEAT_SLOT_COUNT,
+):
+    """
+    Rebuild the melt schedule after mold back-fill may have moved pour days.
+
+    Returns:
+        tuple[dict, pd.DataFrame]: melt schedule keyed by final pour day, and
+        the allocated rows with heat numbers renumbered per final pour day.
+    """
+    if allocated_rows is None or allocated_rows.empty:
+        return {}, pd.DataFrame()
+
+    frame = allocated_rows.copy()
+    if "Original Pour Schedule Day" not in frame.columns:
+        frame["Original Pour Schedule Day"] = frame["Pour Schedule Day"]
+    if "Planning Priority Rank" not in frame.columns:
+        frame["Planning Priority Rank"] = 2
+    if "Due Date Sort" not in frame.columns:
+        if Columns.COL_DUE_DATE in frame.columns:
+            frame["Due Date Sort"] = frame[Columns.COL_DUE_DATE].apply(_normalize_due_date)
+        else:
+            frame["Due Date Sort"] = pd.NaT
+
+    heat_keys = (
+        frame[["Pour Schedule Day", "Original Pour Schedule Day", "Heat #"]]
+        .drop_duplicates()
+        .sort_values(["Pour Schedule Day", "Original Pour Schedule Day", "Heat #"])
+    )
+    slot_map = {}
+    slot_counters = {}
+    for _, key_row in heat_keys.iterrows():
+        day = int(key_row["Pour Schedule Day"])
+        slot_counters[day] = slot_counters.get(day, 0) + 1
+        slot_map[
+            (day, key_row["Original Pour Schedule Day"], key_row["Heat #"])
+        ] = slot_counters[day]
+
+    frame["Heat #"] = frame.apply(
+        lambda row: slot_map[
+            (int(row["Pour Schedule Day"]), row["Original Pour Schedule Day"], row["Heat #"])
+        ],
+        axis=1,
+    )
+    frame["Heat Slot"] = frame["Heat #"]
+
+    melt_schedule = {}
+    for day in sorted(int(value) for value in frame["Pour Schedule Day"].unique()):
+        day_rows = frame[frame["Pour Schedule Day"] == day].copy().reset_index(drop=True)
+
+        summary_rows = []
+        for heat_number, heat_df in day_rows.groupby("Heat #", sort=True):
+            summary_rows.append(
+                _summarize_heat_rows(day, int(heat_number), heat_df, max_planned_heats_per_day)
+            )
+
+        for slot_offset in range(reserved_heat_slot_count):
+            reserved_slot = max_planned_heats_per_day + slot_offset + 1
+            summary_rows.append(
+                {
+                    "Schedule Day": day,
+                    "Heat #": "",
+                    "Heat Slot": reserved_slot,
+                    "Heat Status": "Reserved",
+                    "Anchor Alloy": "",
+                    "Compatibility Group": "",
+                    "Planning Priority": "",
+                    "Review Window": "",
+                    "Earliest Due Date": "",
+                    "Latest Due Date": "",
+                    "Total Weight (lbs)": 0.0,
+                    "Total Molds": 0.0,
+                    "Rows in Heat": 0,
+                    "Jobs": "",
+                    "Extensions": "",
+                }
+            )
+
+        melt_schedule[day] = {
+            "rows": day_rows,
+            "heat_summary": pd.DataFrame(summary_rows),
+            "planned_heat_count": int(day_rows["Heat #"].nunique()),
+            "overflow_heat_count": 0,
+            "reserved_heat_slots": list(
+                range(
+                    max_planned_heats_per_day + 1,
+                    max_planned_heats_per_day + reserved_heat_slot_count + 1,
+                )
+            ),
+        }
+
+    return melt_schedule, frame
+
+
 def _build_compatibility_map_from_frame(day_df):
     """Build a compatibility map from schedule row metadata when available."""
     compatibility_map = {}

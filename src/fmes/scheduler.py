@@ -27,7 +27,12 @@ from .scheduler_build import (
     build_schedule_rows,
     print_bucket,
 )
-from .melt_planning import build_melt_schedule, prioritize_schedule_rows, shift_melt_schedule_days
+from .melt_planning import (
+    PRIORITY_REVIEW_WINDOW_DAYS,
+    build_melt_schedule,
+    prioritize_schedule_rows,
+    rebuild_melt_schedule_from_planned_rows,
+)
 
 from .scheduler_export import (
     build_daily_export_blocks,
@@ -91,6 +96,28 @@ def schedule_molds():
             prioritize_schedule_rows(schedule_data_frame)
         )
 
+        if "Days Until Due" not in schedule_data_frame.columns:
+            due_dates = pd.to_datetime(
+                schedule_data_frame.get(Columns.COL_DUE_DATE, pd.Series(dtype="object")),
+                errors="coerce",
+            ).dt.normalize()
+            reference_date = pd.Timestamp.today().normalize()
+            schedule_data_frame["Days Until Due"] = (due_dates - reference_date).dt.days
+
+        # Keep planning horizon to the next 8 weeks so far-out jobs are not
+        # pulled in early just to fill mold capacity.
+        before_horizon_count = len(schedule_data_frame)
+        schedule_data_frame = schedule_data_frame[
+            schedule_data_frame["Days Until Due"].notna()
+            & (schedule_data_frame["Days Until Due"] <= PRIORITY_REVIEW_WINDOW_DAYS)
+        ].copy()
+        logger.info(
+            "      Planning horizon filter (<= %s days): %s -> %s rows.",
+            PRIORITY_REVIEW_WINDOW_DAYS,
+            before_horizon_count,
+            len(schedule_data_frame),
+        )
+
         logger.info("      Building heat-first pour plan...")
         melt_schedule = build_melt_schedule(schedule_data_frame)
 
@@ -100,41 +127,49 @@ def schedule_molds():
         ) if melt_schedule else pd.DataFrame()
 
         logger.info("      Back-filling mold schedule from planned heats...")
-        mold_schedule_frame, day_offset = assign_mold_days_from_heat_plan(planned_heat_rows)
-        melt_schedule = shift_melt_schedule_days(melt_schedule, day_offset)
+        mold_schedule_frame, _ = assign_mold_days_from_heat_plan(planned_heat_rows)
+        melt_schedule, mold_schedule_frame = rebuild_melt_schedule_from_planned_rows(mold_schedule_frame)
 
-        logger.info(
-            "Day Totals\n%s",
-            mold_schedule_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
-        )
-        logger.debug(
-            "Back-filled mold rows\n%s",
-            mold_schedule_frame[
-                [
-                    Columns.COL_JOB_NUMBER,
-                    "EXT",
-                    Columns.COL_ALLOY,
-                    "Molds for EXT",
-                    "Schedule Day",
-                    "Pour Schedule Day",
-                ]
-            ],
-        )
+        if not mold_schedule_frame.empty and "Schedule Day" in mold_schedule_frame.columns:
+            logger.info(
+                "Day Totals\n%s",
+                mold_schedule_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
+            )
+            logger.debug(
+                "Back-filled mold rows\n%s",
+                mold_schedule_frame[
+                    [
+                        Columns.COL_JOB_NUMBER,
+                        "EXT",
+                        Columns.COL_ALLOY,
+                        "Molds for EXT",
+                        "Schedule Day",
+                        "Pour Schedule Day",
+                    ]
+                ],
+            )
+            print_bucket(mold_schedule_frame)
+            mold_days = sorted(int(day) for day in mold_schedule_frame["Schedule Day"].unique())
+        else:
+            logger.info("      No mold rows were back-filled from planned heats.")
+            mold_days = []
 
-        print_bucket(mold_schedule_frame)
-
-        mold_day_dates = build_schedule_dates(
-            {day: pd.DataFrame() for day in sorted(mold_schedule_frame["Schedule Day"].unique())},
-            datetime.today() + timedelta(days=1),
-        )
-        pour_day_dates = build_schedule_dates(
-            {day: pd.DataFrame() for day in sorted(melt_schedule.keys())},
-            datetime.today() + timedelta(days=2),
-        )
+        pour_days = sorted(int(day) for day in melt_schedule.keys())
+        all_days = mold_days + pour_days
+        if all_days:
+            # One shared calendar keeps mold dates and pour dates consistent.
+            calendar = build_schedule_dates(
+                {day: pd.DataFrame() for day in range(1, max(all_days) + 1)},
+                datetime.today() + timedelta(days=1),
+            )
+        else:
+            calendar = {}
+        mold_day_dates = {day: calendar[day] for day in mold_days}
+        pour_day_dates = {day: calendar[day] for day in pour_days}
 
         daily_schedules = {
             day: mold_schedule_frame[mold_schedule_frame["Schedule Day"] == day].copy()
-            for day in sorted(mold_schedule_frame["Schedule Day"].unique())
+            for day in mold_days
         }
         export_blocks = build_daily_export_blocks(
             daily_schedules,
