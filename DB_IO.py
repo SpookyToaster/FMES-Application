@@ -32,7 +32,7 @@ MAIN_DASHBOARD_SQL = """
         o.ShipDate AS [Ship Date],
         o.TotalValue AS [Total Value],
         s.PourWeight AS [Pour Weight],
-        s.TotalPourWT AS [Total Pour WT],
+        COALESCE(NULLIF(s.TotalPourWT, 0), s.PourWeight * s.QuantityOfMolds, 0) AS [Total Pour WT],
         -- TOOLIMPRESSIONS is the ERP "# on" field; read live because it rarely changes and snapshots may be stale.
         COALESCE(
             TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.TOOLIMPRESSIONS))), '')),
@@ -197,7 +197,11 @@ MAIN_DASHBOARD_LIVE_SQL = """
         CAST(COALESCE(CastingsPerMold, 0) AS decimal(18, 4)) AS [Castings Per Mold],
         CAST(COALESCE(QuantityOfCores, 0) AS decimal(18, 4)) AS [Quantity of Cores],
         CAST(COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Pour Weight],
-        CAST(COALESCE(TotalPourWT, 0) AS decimal(18, 4)) AS [Total Pour WT],
+        -- POURQUANTITY stays 0 until pours are recorded, so derive total from per-mold weight.
+        CAST(
+            COALESCE(NULLIF(TotalPourWT, 0), PourWeight * QuantityOfMolds, 0)
+            AS decimal(18, 4)
+        ) AS [Total Pour WT],
         CAST(COALESCE(OpenTotalValue, TotalValue, 0) AS decimal(18, 4)) AS [Total Value],
         COALESCE(MainHeatNoAssigned, HeatNumber, '') AS [Heat No Assigned],
         CAST(NULLIF(COALESCE(CastingsProduced, 0), 0) AS decimal(18, 4)) AS [Castings Produced],

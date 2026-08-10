@@ -78,7 +78,7 @@ SELECT
     o.ShipDate AS [Ship Date],
     o.TotalValue AS [Total Value],
     s.PourWeight AS [Pour Weight],
-    s.TotalPourWT AS [Total Pour WT],
+    COALESCE(NULLIF(s.TotalPourWT, 0), s.PourWeight * s.QuantityOfMolds, 0) AS [Total Pour WT],
     -- TOOLIMPRESSIONS is the ERP "# on" field; read live because it rarely changes and snapshots may be stale.
     COALESCE(
         TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.TOOLIMPRESSIONS))), '')),
