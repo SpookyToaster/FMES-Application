@@ -210,6 +210,3 @@ def can_alloy_share_heat_with(
         if _normalize_alloy_key(value)
     }
     return candidate_key in specific_alloys
-
-
-Can_Alloy_Share_Heat_With = can_alloy_share_heat_with

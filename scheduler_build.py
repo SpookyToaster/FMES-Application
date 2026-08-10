@@ -112,13 +112,6 @@ def Get_extension_mold_limit(job):
     return min(max_by_weight, EXTENSION_MOLD_LIMIT)
 
 
-def Calculate_Splits(job):
-    """Return the number of extensions required to schedule all remaining molds for a job."""
-    molds_needed = math.ceil(job[Columns.COL_MOLDS_NEEDED])
-    extension_limit = Get_extension_mold_limit(job)
-    return math.ceil(molds_needed / extension_limit)
-
-
 def _build_remaining_extension_plan(total_molds, completed_molds, extension_limit):
     """
     Build the list of extensions still needed after accounting for completed molds.

@@ -48,11 +48,9 @@ def Schedule_Molds():
     """
     try:
         schedule_source = os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
-        run_id_text = os.getenv("SCHEDULER_RUN_ID", "").strip()
-        run_id = int(run_id_text) if run_id_text else None
 
         if schedule_source == "sql":
-            sync_result = Sync_Open_Order_Report_With_SQL(run_id=run_id)
+            sync_result = Sync_Open_Order_Report_With_SQL()
             print(
                 "Synchronized Open Order Report from SQL "
                 f"({sync_result['row_count']} rows)."
@@ -61,7 +59,7 @@ def Schedule_Molds():
             print(f"Historical OOR: {sync_result['historical_oor_path']}")
             print(f"DB Snapshot: {sync_result['db_snapshot_path']}")
 
-            input_file = Read_File(source="sql", run_id=run_id)
+            input_file = Read_File(source="sql")
         elif schedule_source == "excel":
             input_file = Read_File(source="excel")
         else:

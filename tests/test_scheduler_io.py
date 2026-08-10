@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,13 +9,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from alloy_compatibility import can_alloy_share_heat_with
 from scheduler_io import (
-    Can_Alloy_Share_Heat_With,
     Read_File,
     SQL_MAIN_EXPORT_COLUMNS,
     Sync_Open_Order_Report_With_SQL,
-    _restore_ignorable_namespace_declarations,
 )
+from workbook_sync import restore_ignorable_namespace_declarations
 
 
 class SchedulerIOTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class SchedulerIOTests(unittest.TestCase):
             b'mc:Ignorable="x14ac xr xr2 xr3"><s:sheetData/></s:worksheet>'
         )
 
-        patched = _restore_ignorable_namespace_declarations(xml_bytes).decode("utf-8")
+        patched = restore_ignorable_namespace_declarations(xml_bytes).decode("utf-8")
 
         self.assertIn('xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"', patched)
         self.assertIn('xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"', patched)
@@ -70,7 +70,7 @@ class SchedulerIOTests(unittest.TestCase):
             }
         ]
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
             frame = Read_File(source="sql")
 
         self.assertEqual(frame.iloc[0]["Molds Needed"], 7)
@@ -78,7 +78,7 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["Scheduled"], "NO")
 
     def test_read_file_sql_wraps_failures(self):
-        with patch("scheduler_io.get_main_dashboard_rows", side_effect=RuntimeError("db down")):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):
             with self.assertRaises(RuntimeError) as context:
                 Read_File(source="sql")
 
@@ -116,7 +116,7 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
             frame = Read_File(source="sql")
 
         self.assertEqual(len(frame), 1)
@@ -140,7 +140,7 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
             with self.assertRaises(RuntimeError) as context:
                 Read_File(source="sql")
 
@@ -150,7 +150,7 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertIn("Part Number", message)
 
     def test_read_file_sql_reports_zero_matched_rows(self):
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=[]):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=[]):
             with self.assertRaises(RuntimeError) as context:
                 Read_File(source="sql")
 
@@ -174,7 +174,7 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
             frame = Read_File(source="sql")
 
         self.assertEqual(len(frame), 1)
@@ -228,7 +228,7 @@ class SchedulerIOTests(unittest.TestCase):
             ]
         )
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows), patch(
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
             "scheduler_io.pd.read_csv", return_value=compatibility_frame
         ):
             frame = Read_File(source="sql")
@@ -288,7 +288,7 @@ class SchedulerIOTests(unittest.TestCase):
             ]
         )
 
-        with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows), patch(
+        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
             "scheduler_io.pd.read_csv", return_value=compatibility_frame
         ):
             frame = Read_File(source="sql")
@@ -313,7 +313,7 @@ class SchedulerIOTests(unittest.TestCase):
         }
 
         self.assertTrue(
-            Can_Alloy_Share_Heat_With("80-40", "150-135", compatibility_map=compatibility_map)
+            can_alloy_share_heat_with("80-40", "150-135", compatibility_map=compatibility_map)
         )
 
     def test_can_alloy_share_heat_with_honors_directional_specific_compatibility(self):
@@ -331,10 +331,10 @@ class SchedulerIOTests(unittest.TestCase):
         }
 
         self.assertTrue(
-            Can_Alloy_Share_Heat_With("CF3M", "CF8M", compatibility_map=compatibility_map)
+            can_alloy_share_heat_with("CF3M", "CF8M", compatibility_map=compatibility_map)
         )
         self.assertFalse(
-            Can_Alloy_Share_Heat_With("CF8M", "CF3M", compatibility_map=compatibility_map)
+            can_alloy_share_heat_with("CF8M", "CF3M", compatibility_map=compatibility_map)
         )
 
     def test_sync_open_order_report_with_sql_writes_backup_history_and_snapshot(self):
@@ -397,7 +397,7 @@ class SchedulerIOTests(unittest.TestCase):
                 }
             ]
 
-            with patch("scheduler_io.get_main_dashboard_rows", return_value=sql_rows):
+            with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
                 result = Sync_Open_Order_Report_With_SQL(
                     source_workbook_path=str(source_path),
                     backup_dir=str(backup_dir),

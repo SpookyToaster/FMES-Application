@@ -11,7 +11,6 @@ import shutil
 import pandas as pd
 
 from alloy_compatibility import (
-    Can_Alloy_Share_Heat_With,
     DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
     apply_alloy_compatibility,
     load_alloy_compatibility_map,
@@ -21,7 +20,6 @@ from DB_IO import get_main_dashboard_scheduler_rows
 from scheduler_validation import validate_sql_rows
 from workbook_sync import (
     export_worksheet_values,
-    restore_ignorable_namespace_declarations,
     save_sql_snapshot,
     write_sql_data_to_oor,
 )
@@ -99,17 +97,11 @@ def _next_incremented_path(directory, stem, suffix=".xlsx"):
         index += 1
 
 
-_restore_ignorable_namespace_declarations = restore_ignorable_namespace_declarations
-
-
 def Sync_Open_Order_Report_With_SQL(
     source_workbook_path=DEFAULT_OPEN_ORDER_REPORT_PATH,
     backup_dir=DEFAULT_BACKUP_DIR,
     historical_oor_dir=DEFAULT_HISTORICAL_OOR_DIR,
     db_snapshot_dir=DEFAULT_DB_SNAPSHOT_DIR,
-    run_id=None,
-    start_due_date=None,
-    end_due_date=None,
 ):
     """
     Sync Open Order Report workbook artifacts with current SQL main-dashboard data.
@@ -225,9 +217,6 @@ def _normalize_sql_rows(raw_rows):
 def Read_File(
     filepath=DEFAULT_OPEN_ORDER_REPORT_PATH,
     source="excel",
-    run_id=None,
-    start_due_date=None,
-    end_due_date=None,
     alloy_compatibility_csv_path=DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
 ):
     """
@@ -239,9 +228,6 @@ def Read_File(
     Args:
         filepath: Excel path used when source="excel".
         source:   "excel" or "sql".
-        run_id:   Optional SchedulerRun.RunId used when source="sql".
-        start_due_date: Optional inclusive lower bound (source="sql").
-        end_due_date:   Optional inclusive upper bound (source="sql").
 
     Returns:
         pandas DataFrame with scheduler-compatible columns.

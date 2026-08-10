@@ -39,12 +39,6 @@ def parse_args():
         help="Input source override (defaults to SCHEDULER_INPUT_SOURCE or sql).",
     )
     parser.add_argument(
-        "--run-id",
-        type=int,
-        default=None,
-        help="Optional Scheduler run id (used when source=sql and history tables exist).",
-    )
-    parser.add_argument(
         "--output-file",
         default=DEFAULT_MOLD_OUTPUT,
         help="Output path for Mold Schedule workbook.",
@@ -86,9 +80,6 @@ def main():
 
     if args.source:
         os.environ["SCHEDULER_INPUT_SOURCE"] = args.source
-
-    if args.run_id is not None:
-        os.environ["SCHEDULER_RUN_ID"] = str(args.run_id)
 
     result = run(
         output_file=args.output_file,

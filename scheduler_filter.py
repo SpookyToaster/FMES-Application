@@ -73,27 +73,3 @@ def Mold_Scheduler(ReadyToMold):
         return jobs_to_schedule
     except Exception as exc:
         raise RuntimeError("Failed while filtering jobs for mold scheduling") from exc
-
-
-def jobs_to_schedule_test(jobs_to_schedule):
-    """Print a diagnostic list of jobs selected for scheduling (manual debug helper)."""
-    print("\nJobs selected for scheduling:")
-
-    for job in jobs_to_schedule:
-        print(
-            f"{job[Columns.COL_JOB_NUMBER]} | "
-            f"{job['Customer Name']} | "
-            f"Molds Needed: {job[Columns.COL_MOLDS_NEEDED]}"
-        )
-
-    print(f"\nTotal Jobs Selected: {len(jobs_to_schedule)}")
-
-
-def scheduled_rows_test(schedule_rows):
-    """Print expanded extension rows (manual debug helper)."""
-    for row in schedule_rows:
-        print(
-            f"{row[Columns.COL_JOB_NUMBER]}"
-            f"{row['EXT']} | "
-            f"{row['Molds for EXT']} molds"
-        )

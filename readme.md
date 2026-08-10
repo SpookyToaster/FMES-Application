@@ -63,7 +63,7 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 ### Database & Reporting Modules
 
 - [Database.py](Database.py) validates DB environment and opens SQL Server connections.
-- [DB_IO.py](DB_IO.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_orders_dashboard_rows`, `get_main_dashboard_rows`).
+- [DB_IO.py](DB_IO.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_main_dashboard_rows`, `get_main_dashboard_scheduler_rows`).
 - [load_historical_snapshot.py](load_historical_snapshot.py) loads ERP snapshot CSV data into SQL Server history tables.
 - [Production_Report_Queries.sql](Production_Report_Queries.sql) contains production-ready SQL for Orders and Main dashboard column sets.
 
@@ -87,7 +87,6 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 - Defaults to SQL-backed input using [DB_IO.py](DB_IO.py) `get_main_dashboard_rows()`.
 - Falls back to the Open Order Report Excel file when SQL input is empty for the selected run.
 - Supports explicit source selection via `SCHEDULER_INPUT_SOURCE` (`sql` or `excel`).
-- Supports optional SQL run selection via `SCHEDULER_RUN_ID`.
 - Strips whitespace from Excel column headers after loading.
 - Filters out rows that are not eligible for molding.
 - Uses modular orchestration to run each scheduling stage.

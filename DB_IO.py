@@ -1,49 +1,7 @@
 """Database input/output functions."""
 
-from pathlib import Path
-
 from Database import connect
 from scheduler_validation import append_missing_job_id_audit
-
-
-MISSING_JOB_ID_LOG_DIR = Path(
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1\Quality\Schedule"
-)
-MISSING_JOB_ID_LOG_PREFIX = "Missing_Job_ID_Removals"
-MISSING_JOB_ID_LOG_RETENTION_FILES = 12
-
-
-ORDERS_DASHBOARD_SQL = """
-    SELECT
-        h.ORDERNUMBER AS [Order Number],
-        d.LINENUMBER AS [Line],
-        h.CUSTOMERCODE AS [Customer],
-        h.CUSTOMERNAME AS [Customer Name],
-        h.CUSTOMERPO AS [Customer PO],
-        h.CURRENCY AS [Currency],
-        d.PRODUCTNUMBER AS [Part Number],
-        d.DESCRIPTION AS [Description],
-        d.SHIPPINGUOM AS [UOM],
-        COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) AS [Job Number],
-        d.JOBTYPE AS [Job Type],
-        d.QUANTITYORDERED AS [Quantity Ordered],
-        d.PIECESSHIPPEDTODATE AS [Quantity Shipped To Date],
-        d.ALLOCATEDPIECES AS [Allocated Quantity],
-        d.ORDERPRICE AS [Unit Price],
-        d.EXTENDEDORDERVALUE AS [Total Value],
-        h.ORDERDATE AS [Order Date],
-        h.SHIPDATE AS [Ship Date],
-        COALESCE(d.REQUIREDDATE, h.REQUIREDDATE) AS [Required Date]
-    FROM dbo.OEHEader h
-    INNER JOIN dbo.OEDetail d
-        ON d.ORDERNUMBER = h.ORDERNUMBER
-    WHERE (? IS NULL OR h.ORDERDATE >= ?)
-      AND (? IS NULL OR h.ORDERDATE < DATEADD(DAY, 1, ?))
-    ORDER BY
-        h.ORDERDATE,
-        h.ORDERNUMBER,
-        d.LINENUMBER;
-"""
 
 
 MAIN_DASHBOARD_SQL = """
@@ -289,19 +247,6 @@ def list_tables(schema="dbo", include_views=False):
     ]
 
 
-def print_tables(schema="dbo", include_views=False):
-    """Print tables (and optionally views) in a readable list format."""
-    entries = list_tables(schema=schema, include_views=include_views)
-
-    if not entries:
-        print(f"No objects found in schema '{schema}'.")
-        return
-
-    print(f"Objects in schema '{schema}':")
-    for entry in entries:
-        print(f"- {entry['name']} ({entry['type']})")
-
-
 def list_columns(table_name, schema="dbo"):
     """
     Return column metadata for a table in ordinal order.
@@ -375,29 +320,6 @@ def _history_tables_available(cursor):
     return _table_exists(cursor, "SchedulerRun") and _table_exists(cursor, "OrderSnapshot")
 
 
-def get_orders_dashboard_rows(start_date=None, end_date=None):
-    """
-    Return orders dashboard rows from OE header/detail tables.
-
-    Args:
-        start_date: Inclusive lower bound for ORDERDATE, or None.
-        end_date: Inclusive upper bound for ORDERDATE, or None.
-
-    Returns:
-        List of dictionaries keyed by report column labels.
-    """
-    params = (start_date, start_date, end_date, end_date)
-
-    connection = connect()
-    try:
-        cursor = connection.cursor()
-        cursor.execute(ORDERS_DASHBOARD_SQL, *params)
-        rows = cursor.fetchall()
-        return _rows_to_dicts(cursor, rows)
-    finally:
-        connection.close()
-
-
 def get_main_dashboard_rows(run_id=None, start_due_date=None, end_due_date=None):
     """
     Return reduced main dashboard rows keyed by Job Number.
@@ -452,8 +374,3 @@ def get_main_dashboard_scheduler_rows():
         return _rows_to_dicts(cursor, rows)
     finally:
         connection.close()
-
-
-def get_connection():
-    """Return an active SQL Server connection from the shared DB helper."""
-    return connect()

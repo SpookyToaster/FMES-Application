@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import Columns
-from scheduler_build import Assign_days, Build_Daily_Schedules, Build_Schedule_Dates, Build_Schedule_Rows, Calculate_Splits, Expand_Job, get_extensions
+from scheduler_build import Assign_days, Build_Daily_Schedules, Build_Schedule_Dates, Build_Schedule_Rows, Expand_Job, get_extensions
 
 
 class SchedulerBuildTests(unittest.TestCase):
@@ -21,7 +21,6 @@ class SchedulerBuildTests(unittest.TestCase):
         })
 
         self.assertEqual(get_extensions(1), [""])
-        self.assertEqual(Calculate_Splits(job), 3)
 
         expanded = Expand_Job(job)
         self.assertEqual(len(expanded), 3)
