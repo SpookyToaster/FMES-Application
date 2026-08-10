@@ -1,7 +1,7 @@
 # Foundry Management and Execution System (FMES)
 
 **Author:** Logan Burkardt  
-**Last Updated:** August 7, 2026
+**Last Updated:** August 10, 2026
 
 ---
 
@@ -18,21 +18,26 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 ### Completed
 
 - Modular refactor of mold scheduling logic into dedicated modules
-- Merge conflict cleanup and stable orchestration entrypoint
-- Unit and integration test coverage for scheduling boundaries
+- `src/fmes` package layout with snake_case module and function naming throughout
+- Centralized path configuration in [src/fmes/config.py](src/fmes/config.py) (`SCHEDULE_ROOT` resolves from `FMES_SCHEDULE_ROOT` or OneDrive env vars; no hard-coded user paths)
+- Dependency manifests ([pyproject.toml](pyproject.toml), [requirements.txt](requirements.txt)) and expanded [.gitignore](.gitignore)
+- Structured logging: console plus monthly log file under `Quality\Schedule\Logs`
+- Unit and integration test coverage for scheduling boundaries; live-DB tests separated into `tests/integration/`
 - SQL scheduler input validation updated to allow blank Alloy while keeping strict required checks for key fields
 - Local credential hardening using environment variables
 - Startup environment validation utility for DB configuration
 - SQL Server historical snapshot load pipeline with transform/upsert support
-- DB metadata/query helpers in [DB_IO.py](DB_IO.py) for table and column discovery
-- Callable dashboard query methods in [DB_IO.py](DB_IO.py) for Orders and Main report datasets
-- Main dashboard SQL mapping aligned to direct-source policy for molds/cores/pour fields (no cross-field derivations)
+- DB metadata/query helpers in [src/fmes/db_io.py](src/fmes/db_io.py) for table and column discovery
+- Trimmed Main dashboard report query (Job Number, Customer PO, quantities, ship date, value, pour/production fields) plus a full scheduler projection accessor
+- ERP field mapping corrections: castings per mold sourced from `JCJobMaster.TOOLIMPRESSIONS` (the "# on" field); Total Pour WT derived from pour weight × molds when `POURQUANTITY` is unrecorded
 - Production SQL report script in [Production_Report_Queries.sql](Production_Report_Queries.sql)
-- Alloy compatibility reference CSV scaffolded at `Quality\Schedule\compatibleAlloys\alloy_compatibility.csv`
-- Scheduler input loader now attaches compatibility metadata columns from alloy CSV (`Compatibility Group`, `Compatibility Family`)
+- Alloy compatibility reference CSV with directional co-pour rules (`Compatibility Group`, `Compatible With ASTM Group`, `Specific Compatible Alloys`)
+- Initial melt schedule builder in [src/fmes/melt_planning.py](src/fmes/melt_planning.py) with the 5 planned + 1 reserved daily heat slot policy
+- Excel export hardening: calcChain cleanup (no repair prompt) and native numeric cell writes for OOR sync
 
 ### In Progress
 
+- Wiring melt schedule output into user-facing exports and orchestration
 - SQL Server integration beyond reporting reads (write-back schedule persistence)
 - Persistent schedule state between runs
 - Melt-first planning redesign so molding and heat schedules are planned together
@@ -56,10 +61,14 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Module Boundaries
 
-- [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) reads the Open Order Report workbook.
+- [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) reads scheduler input (SQL or Excel) and syncs the Open Order Report workbook.
 - [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py) filters rows down to jobs eligible for molding.
 - [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
 - [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
+- [src/fmes/scheduler_validation.py](src/fmes/scheduler_validation.py) validates SQL rows and writes missing-job audit logs.
+- [src/fmes/alloy_compatibility.py](src/fmes/alloy_compatibility.py) loads the compatibility CSV and evaluates directional co-pour rules.
+- [src/fmes/melt_planning.py](src/fmes/melt_planning.py) assigns heat numbers and builds the initial melt schedule (5+1 slots).
+- [src/fmes/workbook_sync.py](src/fmes/workbook_sync.py) performs OOXML-level workbook writes, snapshots, and calcChain cleanup.
 
 ### Database & Reporting Modules
 
@@ -70,14 +79,20 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Tests
 
+Unit tests (no database required):
+
 - [tests/test_database.py](tests/test_database.py)
-- [tests/test_DB_IO.py](tests/test_DB_IO.py)
 - [tests/test_historical_loader.py](tests/test_historical_loader.py)
 - [tests/test_scheduler_io.py](tests/test_scheduler_io.py)
 - [tests/test_scheduler_filter.py](tests/test_scheduler_filter.py)
 - [tests/test_scheduler_build.py](tests/test_scheduler_build.py)
 - [tests/test_scheduler_export.py](tests/test_scheduler_export.py)
+- [tests/test_melt_planning.py](tests/test_melt_planning.py)
 - [tests/test_scheduler_integration.py](tests/test_scheduler_integration.py)
+
+Integration tests (require live DB credentials; excluded from default discovery):
+
+- [tests/integration/test_db_io.py](tests/integration/test_db_io.py)
 
 ---
 
@@ -85,8 +100,8 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Input Processing
 
-- Defaults to SQL-backed input using [DB_IO.py](DB_IO.py) `get_main_dashboard_rows()`.
-- Falls back to the Open Order Report Excel file when SQL input is empty for the selected run.
+- Defaults to SQL-backed input using [src/fmes/db_io.py](src/fmes/db_io.py) `get_main_dashboard_scheduler_rows()` (full live projection for scheduling).
+- `get_main_dashboard_rows()` provides the trimmed Job Number report projection for dashboards.
 - Supports explicit source selection via `SCHEDULER_INPUT_SOURCE` (`sql` or `excel`).
 - Strips whitespace from Excel column headers after loading.
 - Filters out rows that are not eligible for molding.
@@ -113,17 +128,10 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Alloy Compatibility Reference Data
 
-- Source file: `C:\Users\lburkardt\OneDrive - MonettMetalsUS1\Quality\Schedule\compatibleAlloys\alloy_compatibility.csv`
-- Current columns:
-        - `alloy_code`
-        - `compatibility_group`
-        - `family_tag`
-        - `is_active`
-        - `source_rule`
-        - `notes`
-- Seed rules currently included:
-        - `WCC` and `WCB` share A216 compatibility group.
-        - `130-115` is seeded under a `70-30` family tag/group A148 for future related alloys.
+- Source file: `Quality\Schedule\compatibleAlloys\alloy_compatibility.csv` (path resolved via `config.Paths`)
+- Loader columns: `alloy_code`, `compatibility_group`, `Is_Compat_with_All`, `compatible_specific_alloys`, `is_active`
+- Rules are directional: a stricter alloy can accept a looser one into its heat without implying the reverse.
+- Scheduler input rows gain `Compatibility Group`, `Compatible With ASTM Group`, and `Specific Compatible Alloys` columns.
 
 ### Export Output
 
@@ -136,15 +144,15 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Database Reporting Behavior
 
-- Supports SQL metadata discovery directly from Python through [DB_IO.py](DB_IO.py).
-- Supports callable Orders dashboard extraction from OE header/detail tables.
-- Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run.
-- Uses direct-source values for mold/core/pour outputs in Main dashboard extraction; derived formulas are intentionally excluded so manual Excel calculations stay authoritative.
+- Supports SQL metadata discovery directly from Python through [src/fmes/db_io.py](src/fmes/db_io.py).
+- Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run joined to OE order data by Job Number.
+- Castings per mold reads live from `JCJobMaster.TOOLIMPRESSIONS` because it is a near-static product attribute; snapshots may lag.
+- Total Pour WT falls back to pour weight × quantity of molds when the ERP `POURQUANTITY` has not been recorded yet.
 - Supports operational SQL execution from [Production_Report_Queries.sql](Production_Report_Queries.sql) for direct SSMS usage.
 
 ### Open Order Report Sync Workflow
 
-When running with `SCHEDULER_INPUT_SOURCE=sql`, [Scheduler.py](Scheduler.py) now calls [scheduler_io.py](scheduler_io.py) `Sync_Open_Order_Report_With_SQL()` before scheduling:
+When running with `SCHEDULER_INPUT_SOURCE=sql`, [src/fmes/scheduler.py](src/fmes/scheduler.py) calls [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) `sync_open_order_report_with_sql()` before scheduling:
 
 - Backs up `Open Order Report.xlsx` to `...\Quality\Schedule\Backups` using an incremented filename.
 - Exports the current `OOR` sheet values to `...\Quality\Schedule\Historical OORs\OOR-YYYY-MM-DD_###.xlsx`.
@@ -156,37 +164,34 @@ When running with `SCHEDULER_INPUT_SOURCE=sql`, [Scheduler.py](Scheduler.py) now
 ## Runtime Flow
 
 ```text
-Open Order Report.xlsx
+SQL main dashboard (or Open Order Report.xlsx)
         │
         ▼
-Read_File()
+read_file()
         │
         ▼
 Apply Alloy Compatibility Mapping
         │
         ▼
-Mold_Scheduler()
+mold_scheduler()
         │
         ▼
-Build_Schedule_Rows()
+build_schedule_rows()
         │
         ▼
-Assign_days()
+assign_days()
         │
         ▼
-Build_Daily_Schedules()
+build_daily_schedules()
         │
         ▼
-Build_Schedule_Dates()
+build_schedule_dates()
         │
         ▼
-Build_Daily_Export_Blocks()
+build_daily_export_blocks()
         │
         ▼
-Print_Export_Blocks()
-        │
-        ▼
-Export_Mold_Schedule()
+export_mold_schedule() + export_heat_summary()
 ```
 
 ---
@@ -198,10 +203,11 @@ The public entry points now wrap failures in contextual `RuntimeError` messages 
 - File load failures report the input workbook and sheet.
 - Filtering failures report the scheduling stage.
 - Build and export failures identify the step that failed.
-- [Scheduler.py](Scheduler.py) also guards the full orchestration path.
-- [Database.py](Database.py) validates DB environment configuration and reports missing variables clearly.
+- [src/fmes/scheduler.py](src/fmes/scheduler.py) also guards the full orchestration path.
+- [src/fmes/database.py](src/fmes/database.py) validates DB environment configuration and reports missing variables clearly.
+- Runs log to the console and to a monthly file at `Quality\Schedule\Logs\fmes_YYYY-MM.log`.
 
-Use [check_db_env.py](check_db_env.py) before running DB-dependent tasks.
+Use `python -m fmes.check_db_env` (from `src/`) before running DB-dependent tasks.
 
 ---
 
@@ -213,7 +219,7 @@ Run the test suite from the project folder:
 .venv\Scripts\python.exe -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-Current verification snapshot: 24 tests passing.
+Current verification snapshot: 39 unit tests passing.
 
 The current suite covers:
 
@@ -221,10 +227,11 @@ The current suite covers:
 - file loading
 - filtering rules
 - job expansion and day assignment
+- melt planning heat grouping (5+1 slots, compatibility, overflow)
 - export block generation and workbook writing
 - end-to-end orchestration
 
-Latest focused verification pass: 31 tests passing after scheduler IO and DB query updates.
+Live-DB integration tests run separately: `python tests/integration/test_db_io.py`
 
 ---
 

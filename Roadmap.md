@@ -1,6 +1,6 @@
 # FMES Roadmap
 
-**Last Updated:** August 7, 2026
+**Last Updated:** August 10, 2026
 
 ## Vision
 
@@ -35,25 +35,28 @@ Production conditions will change daily. The system should adapt rather than att
 
 ### Completed
 
-- Mold scheduling pipeline refactored into modular files
-- Orchestration flow stabilized in [Scheduler.py](Scheduler.py)
-- Boundary test suite added for IO, filtering, building, export, integration, and DB environment checks
+- Mold scheduling pipeline refactored into modular files under the `src/fmes` package (snake_case naming throughout)
+- Orchestration flow stabilized in [src/fmes/scheduler.py](src/fmes/scheduler.py) with [run_scheduler.py](run_scheduler.py) as the entrypoint
+- Configuration centralized in [src/fmes/config.py](src/fmes/config.py): single `SCHEDULE_ROOT` with env-var override; no hard-coded user paths
+- Dependency manifests ([pyproject.toml](pyproject.toml), [requirements.txt](requirements.txt)) and build-artifact `.gitignore` coverage
+- Structured logging (console + monthly file under `Quality\Schedule\Logs`)
+- Boundary test suite for IO, filtering, building, export, melt planning, integration, and DB environment checks; live-DB tests split into `tests/integration/`
 - SQL scheduler input validation adjusted to allow blank Alloy while maintaining strict required-field checks for critical scheduling columns
 - Credential handling moved to local environment variables
-- DB startup environment validator added in [check_db_env.py](check_db_env.py)
-- Historical snapshot SQL schema and loader pipeline implemented ([HistoricalReporting_ERP_Exact.sql](HistoricalReporting_ERP_Exact.sql), [load_historical_snapshot.py](load_historical_snapshot.py))
-- DB metadata discovery and dashboard data access methods implemented in [DB_IO.py](DB_IO.py)
+- Historical snapshot SQL schema and loader pipeline implemented ([HistoricalReporting_ERP_Exact.sql](HistoricalReporting_ERP_Exact.sql), [src/fmes/load_historical_snapshot.py](src/fmes/load_historical_snapshot.py))
+- DB metadata discovery and dashboard data access methods implemented in [src/fmes/db_io.py](src/fmes/db_io.py), including a trimmed Job Number report projection and a full scheduler projection
+- ERP field mapping corrections: castings per mold from `JCJobMaster.TOOLIMPRESSIONS`; Total Pour WT derived when `POURQUANTITY` is unrecorded
 - Production-ready dashboard SQL query pack added in [Production_Report_Queries.sql](Production_Report_Queries.sql)
-- Main dashboard SQL mapping aligned to direct-source output policy for molds/cores/pour fields (manual derivations remain in Excel workflow)
-- Alloy compatibility master-data seed file created (`compatibleAlloys/alloy_compatibility.csv`) with scheduler-side CSV loader integration
+- Alloy compatibility master data with directional co-pour rules, integrated into scheduler input
+- Initial melt schedule builder ([src/fmes/melt_planning.py](src/fmes/melt_planning.py)) implementing the 5 planned + 1 reserved heat slot policy with overflow flagging
+- Excel export hardening: calcChain cleanup and native numeric cell writes
+- Dead-code cleanup pass (unused modules, placeholder configs, duplicate constants removed)
 
 ### In Progress
 
-- DB report read layer is implemented; application-level orchestration of automated dashboard refresh/export is still in progress
-- Error handling is present across scheduling and DB entrypoints, with room for centralized logging
+- Wiring melt schedule output ([src/fmes/melt_planning.py](src/fmes/melt_planning.py)) into orchestration and user-facing exports
 - Schedule persistence model is still not in use for run-to-run carryforward
-- Build and release process hardening is in progress (`build_scheduler.ps1` now writes PyInstaller output to local AppData paths to avoid Windows/OneDrive lock conflicts)
-- Planning model redesign in progress: melt-first with mold backfill, plus a 5+1 daily heat slot policy
+- Planning model redesign in progress: melt-first with mold backfill (strictest-anchor grouping, 10-mold cap handling, backfill loop)
 
 ### Open Gaps
 
@@ -65,20 +68,20 @@ Production conditions will change daily. The system should adapt rather than att
 
 ## Phase 1 - Refactoring & Foundation
 
-### Status: Complete (with targeted follow-ups)
+### Status: Complete
 
 ### Code Organization
 
-- Completed: split scheduler into logical modules
-- Partially completed: centralize configuration and constants
+- Completed: split scheduler into logical modules (`src/fmes` package layout)
+- Completed: centralize configuration and constants ([src/fmes/config.py](src/fmes/config.py))
 - Completed: implement core database access layer for configuration, metadata, and report retrieval
-- Partially completed: improve error handling
-- Not started: structured application logging
+- Completed: consistent error wrapping across public entrypoints
+- Completed: structured application logging (console + monthly file)
 
 ### Data Infrastructure
 
 - Partially completed: establish historical reporting tables and lifecycle upsert path
-- Completed: create production query definitions for Orders/Main dashboard data sets
+- Completed: create production query definitions for the Main dashboard data set
 - Not started: migrate scheduler run-state storage and scheduling decisions to SQL Server
 
 ---
@@ -163,14 +166,14 @@ LastModified
 
 ### Melt WIP Schedule
 
-- Build melt scheduling logic with fixed daily slots (5 planned heats + 1 reserved contingency heat)
-- Track melt work-in-progress
+- Partially completed: initial melt schedule builder exists with fixed daily slots (5 planned heats + 1 reserved contingency heat) and overflow flagging
+- Remaining: wire melt schedule into orchestration/exports and track melt work-in-progress
 
 ### Alloy Chemistry Compatibility
 
-- Use CSV master data (not hardcoded conditions) to define co-pour compatibility groups.
+- Completed: CSV master data (not hardcoded conditions) defines directional co-pour compatibility groups.
 - Keep compatibility immutable by default, with controlled additive updates as new alloys are introduced.
-- Validate unmapped alloys into an exception path to avoid silent pour-mix errors.
+- Remaining: validate unmapped alloys into an exception path to avoid silent pour-mix errors.
 
 ### Casting & Cleaning WIP Schedule
 
