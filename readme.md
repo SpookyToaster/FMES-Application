@@ -219,6 +219,18 @@ Run the test suite from the project folder:
 .venv\Scripts\python.exe -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
+For fast planning iterations (no full export run), use:
+
+```powershell
+.\run_fast_tests.ps1
+```
+
+This runs only:
+
+- `tests.test_melt_planning`
+- `tests.test_scheduler_integration`
+- `tests.test_mold_schedule_from_melt`
+
 Current verification snapshot: 39 unit tests passing.
 
 The current suite covers:
