@@ -136,7 +136,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
             "9001",
         )
 
-    def test_schedule_molds_filters_out_rows_beyond_eight_week_horizon(self):
+    def test_schedule_molds_filters_to_ten_week_horizon_boundary(self):
         input_file = pd.DataFrame([
             {
                 Columns.COL_JOB_NUMBER: "9009",
@@ -147,13 +147,29 @@ class SchedulerIntegrationTests(unittest.TestCase):
                 Columns.COL_MOLDS_NEEDED: 1,
                 Columns.COL_POUR_WEIGHT: 100,
                 Columns.COL_ALLOY: "A",
-                Columns.COL_DUE_DATE: "2027-12-31",
+                Columns.COL_DUE_DATE: "2026-10-19",
                 "Part Number": "P9",
                 "Customer Name": "Customer",
                 "Quantity of Molds": 1,
                 "Castings Per Mold": 1,
                 "Quantity of Cores": 0,
-            }
+            },
+            {
+                Columns.COL_JOB_NUMBER: "9010",
+                Columns.COL_HOLD: "NO",
+                Columns.COL_JOB_TYPE: "",
+                Columns.COL_SCHEDULED: "NO",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_MOLDS_NEEDED: 1,
+                Columns.COL_POUR_WEIGHT: 100,
+                Columns.COL_ALLOY: "A",
+                Columns.COL_DUE_DATE: "2026-10-20",
+                "Part Number": "P10",
+                "Customer Name": "Customer",
+                "Quantity of Molds": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+            },
         ])
 
         schedule_rows_df = pd.DataFrame([
@@ -162,18 +178,35 @@ class SchedulerIntegrationTests(unittest.TestCase):
                 Columns.COL_CAST_TYPE: "L",
                 Columns.COL_POUR_WEIGHT: 100,
                 Columns.COL_ALLOY: "A",
-                Columns.COL_DUE_DATE: "2027-12-31",
+                Columns.COL_DUE_DATE: "2026-10-19",
                 "EXT": "",
                 "Extension_Seq": 0,
                 "Molds for EXT": 1,
                 "Total Weight per EXT": 100,
-            }
+            },
+            {
+                Columns.COL_JOB_NUMBER: "9010",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 100,
+                Columns.COL_ALLOY: "A",
+                Columns.COL_DUE_DATE: "2026-10-20",
+                "EXT": "",
+                "Extension_Seq": 0,
+                "Molds for EXT": 1,
+                "Total Weight per EXT": 100,
+            },
         ])
 
         with patch("fmes.scheduler.read_file", return_value=input_file), \
              patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=schedule_rows_df), \
+             patch(
+                 "fmes.scheduler.prioritize_schedule_rows",
+                 side_effect=lambda df: df.assign(
+                     **{"Days Until Due": [70, 71], "Planning Priority": ["Priority Review", "Standard"]}
+                 ),
+             ), \
              patch("fmes.scheduler.build_melt_schedule", return_value={}) as build_melt_schedule, \
              patch("fmes.scheduler.assign_mold_days_from_heat_plan", return_value=(pd.DataFrame(), 0)), \
              patch("fmes.scheduler.rebuild_melt_schedule_from_planned_rows", return_value=({}, pd.DataFrame())), \
@@ -185,7 +218,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
             scheduler.schedule_molds()
 
         melt_input_df = build_melt_schedule.call_args.args[0]
-        self.assertTrue(melt_input_df.empty)
+        self.assertEqual(melt_input_df[Columns.COL_JOB_NUMBER].tolist(), ["9009"])
 
     def test_schedule_molds_uses_one_calendar_for_mold_and_pour_days(self):
         input_file = pd.DataFrame([

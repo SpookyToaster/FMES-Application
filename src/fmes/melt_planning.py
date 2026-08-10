@@ -17,7 +17,7 @@ MAX_TOTAL_HEAT_SLOTS_PER_DAY = MAX_PLANNED_HEATS_PER_DAY + RESERVED_HEAT_SLOT_CO
 HEAT_WEIGHT_LIMIT_LBS = 2300
 HEAT_MOLD_LIMIT = 10
 HIGHEST_PRIORITY_WINDOW_DAYS = 14
-PRIORITY_REVIEW_WINDOW_DAYS = 56
+PRIORITY_REVIEW_WINDOW_DAYS = 70
 
 
 def _normalize_due_date(value):
@@ -38,14 +38,14 @@ def _normalize_reference_date(reference_date=None):
 def _priority_metadata_for_due_date(due_date, reference_date):
     """Classify a due date into planning priority windows."""
     if pd.isna(due_date):
-        return 2, "Standard", "Outside 8 Weeks", None
+        return 2, "Standard", "Outside 10 Weeks", None
 
     days_until_due = int((due_date - reference_date).days)
     if days_until_due <= HIGHEST_PRIORITY_WINDOW_DAYS:
         return 0, "Highest Priority", "Next 2 Weeks", days_until_due
     if days_until_due <= PRIORITY_REVIEW_WINDOW_DAYS:
-        return 1, "Priority Review", "Next 8 Weeks", days_until_due
-    return 2, "Standard", "Outside 8 Weeks", days_until_due
+        return 1, "Priority Review", "Next 10 Weeks", days_until_due
+    return 2, "Standard", "Outside 10 Weeks", days_until_due
 
 
 def prioritize_schedule_rows(schedule_df, reference_date=None):

@@ -104,7 +104,7 @@ def schedule_molds():
             reference_date = pd.Timestamp.today().normalize()
             schedule_data_frame["Days Until Due"] = (due_dates - reference_date).dt.days
 
-        # Keep planning horizon to the next 8 weeks so far-out jobs are not
+        # Keep planning horizon to the next 10 weeks so far-out jobs are not
         # pulled in early just to fill mold capacity.
         before_horizon_count = len(schedule_data_frame)
         schedule_data_frame = schedule_data_frame[
