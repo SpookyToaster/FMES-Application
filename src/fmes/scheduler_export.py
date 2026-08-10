@@ -10,6 +10,7 @@ workbooks:
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
 from openpyxl.styles import Border, Font, Side
 import pandas as pd
 
@@ -35,7 +36,46 @@ def _normalize_due_date(value):
     return parsed.date()
 
 
-def build_daily_export_blocks(Daily_Schedules, Day_Dates):
+def _normalize_date_value(value):
+    """Return normalized pandas Timestamp date value or NaT."""
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return pd.NaT
+    return pd.Timestamp(parsed).normalize()
+
+
+def _target_pour_date(due_date, target_days=14):
+    """Return the target pour date that satisfies the minimum lead-time goal."""
+    if pd.isna(due_date):
+        return pd.NaT
+    return due_date - pd.Timedelta(days=target_days)
+
+
+def _planner_risk_for_buffer(buffer_days):
+    """Return planner-facing risk status and diagnostic text for pour buffer."""
+    if buffer_days is None:
+        return "UNKNOWN", "No due date available"
+    if buffer_days < 14:
+        return "AT RISK", "Pour is less than 14 days before due"
+    if buffer_days < 21:
+        return "WATCH", "Pour is within a narrow due-date buffer window"
+    return "ON TRACK", "Pour meets the minimum 14-day due buffer"
+
+
+def _apply_11x17_portrait_layout(ws):
+    """Apply print settings optimized for 11x17 portrait output."""
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.page_setup.paperSize = ws.PAPERSIZE_TABLOID
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.print_options.horizontalCentered = True
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.5
+    ws.page_margins.bottom = 0.5
+
+
+def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
     """
     Combine daily schedule DataFrames with their calendar dates into export blocks.
 
@@ -54,6 +94,45 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates):
             df = df.copy()
             if "Heat #" not in df.columns:
                 df["Heat #"] = ""
+
+            mold_day = Day_Dates[day]
+
+            def _resolve_pour_day_value(row):
+                pour_day = row.get("Pour Schedule Day", "")
+                if pd.isna(pour_day):
+                    return ""
+                try:
+                    return int(pour_day)
+                except (TypeError, ValueError):
+                    return ""
+
+            df["Pour Schedule Day"] = df.apply(_resolve_pour_day_value, axis=1)
+            if pour_day_dates is None:
+                df["Pour Date"] = ""
+                df["Pour Weekday"] = ""
+            else:
+                df["Pour Date"] = df["Pour Schedule Day"].apply(
+                    lambda pour_day: pour_day_dates.get(pour_day, {}).get("date", "") if pour_day != "" else ""
+                )
+                df["Pour Weekday"] = df["Pour Schedule Day"].apply(
+                    lambda pour_day: pour_day_dates.get(pour_day, {}).get("weekday", "") if pour_day != "" else ""
+                )
+
+            df["Mold Date"] = mold_day["date"]
+            df["Mold Weekday"] = mold_day["weekday"]
+
+            due_dates = df[Columns.COL_DUE_DATE].apply(_normalize_date_value)
+            pour_dates = df["Pour Date"].apply(_normalize_date_value)
+            df["Pour Buffer Days"] = [
+                int((due_date - pour_date).days)
+                if not pd.isna(due_date) and not pd.isna(pour_date)
+                else None
+                for due_date, pour_date in zip(due_dates, pour_dates)
+            ]
+
+            risk_status = df["Pour Buffer Days"].apply(_planner_risk_for_buffer)
+            df["Due Buffer Status"] = risk_status.apply(lambda pair: pair[0])
+            df["Planner Diagnostic"] = risk_status.apply(lambda pair: pair[1])
 
             weight_total = df["Total Weight per EXT"].fillna(0).sum()
             mold_total = df["Molds for EXT"].fillna(0).sum()
@@ -76,6 +155,12 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates):
                         "Total Weight per EXT",
                         "Molds for EXT",
                         "Heat #",
+                        "Pour Schedule Day",
+                        "Pour Date",
+                        "Pour Weekday",
+                        "Pour Buffer Days",
+                        "Due Buffer Status",
+                        "Planner Diagnostic",
                     ]
                 ].copy(),
                 "weight_total": weight_total,
@@ -190,7 +275,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
             ws.cell(current_row, 2, block["date"].strftime("%m/%d/%Y"))
             ws.cell(current_row, 4, block["weekday"])
 
-            for col in range(1, 14):
+            for col in range(1, 20):
                 ws.cell(current_row, col).font = bold
 
             current_row += 2
@@ -209,6 +294,12 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
                 "Total Weight per EXT",
                 "# of Molds for EXT",
                 "Heat #",
+                "Pour Day",
+                "Pour Date",
+                "Pour Weekday",
+                "Pour Buffer Days",
+                "Due Buffer Status",
+                "Planner Diagnostic",
             ]
 
             for col_num, header in enumerate(headers, start=1):
@@ -233,13 +324,21 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
                     row.get("Total Weight per EXT", ""),
                     row.get("Molds for EXT", ""),
                     row.get("Heat #", ""),
+                    row.get("Pour Schedule Day", ""),
+                    _normalize_due_date(row.get("Pour Date", "")),
+                    row.get("Pour Weekday", ""),
+                    row.get("Pour Buffer Days", ""),
+                    row.get("Due Buffer Status", ""),
+                    row.get("Planner Diagnostic", ""),
                 ]
 
                 for col_num, value in enumerate(values, start=1):
                     cell = ws.cell(current_row, col_num, value)
                     cell.border = thin
-                    if col_num == 1 and value != "":
+                    if col_num in {1, 15} and value != "":
                         cell.number_format = "m/d/yyyy"
+                    if col_num == 19:
+                        cell.alignment = Alignment(wrap_text=True, vertical="top")
 
                 current_row += 1
 
@@ -251,11 +350,32 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
             ws.cell(current_row, 12).font = bold
             current_row += 3
 
-        widths = {"A": 12, "B": 30, "C": 25, "D": 15, "E": 6, "F": 15, "G": 12, "H": 15, "I": 15, "J": 15, "K": 18, "L": 15}
-        widths["M"] = 10
+        widths = {
+            "A": 11,
+            "B": 22,
+            "C": 18,
+            "D": 12,
+            "E": 6,
+            "F": 10,
+            "G": 9,
+            "H": 10,
+            "I": 10,
+            "J": 10,
+            "K": 13,
+            "L": 11,
+            "M": 8,
+            "N": 8,
+            "O": 11,
+            "P": 10,
+            "Q": 8,
+            "R": 12,
+            "S": 34,
+        }
 
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws)
 
         wb.save(output_file)
         print(f"Saved: {output_file}")
@@ -316,9 +436,18 @@ def build_heat_summary_rows(export_blocks):
 
         for _, row in heat_summary.iterrows():
             heat_number = row.get("Heat #", "")
+            schedule_date = block_date.date() if hasattr(block_date, "date") else block_date
+            earliest_due = _normalize_date_value(row.get("Earliest Due Date", ""))
+            latest_due = _normalize_date_value(row.get("Latest Due Date", ""))
+            schedule_ts = _normalize_date_value(schedule_date)
+            due_buffer_days = None
+            if not pd.isna(earliest_due) and not pd.isna(schedule_ts):
+                due_buffer_days = int((earliest_due - schedule_ts).days)
+            buffer_status, diagnostic = _planner_risk_for_buffer(due_buffer_days)
+
             summary_rows.append(
                 {
-                    "Schedule Date": block_date.date() if hasattr(block_date, "date") else block_date,
+                    "Schedule Date": schedule_date,
                     "Weekday": block_weekday,
                     "Heat Slot": row.get("Heat Slot", ""),
                     "Heat #": heat_number,
@@ -329,12 +458,16 @@ def build_heat_summary_rows(export_blocks):
                     "Compatibility Group": row.get("Compatibility Group", ""),
                     "Earliest Due Date": _normalize_due_date(row.get("Earliest Due Date", "")),
                     "Latest Due Date": _normalize_due_date(row.get("Latest Due Date", "")),
+                    "Target Pour Date": _normalize_due_date(_target_pour_date(earliest_due)),
+                    "Pour Buffer Days": due_buffer_days,
+                    "Due Buffer Status": buffer_status,
                     "Total Weight (lbs)": float(row.get("Total Weight (lbs)", 0) or 0),
                     "Total Molds": float(row.get("Total Molds", 0) or 0),
                     "Rows in Heat": int(row.get("Rows in Heat", 0) or 0),
                     "Jobs": row.get("Jobs", ""),
                     "Extensions": row.get("Extensions", ""),
                     "Job Breakout": heat_breakout_map.get(heat_number, ""),
+                    "Planner Diagnostic": diagnostic,
                 }
             )
 
@@ -359,10 +492,14 @@ def build_heat_planner_rows(summary_rows):
                 "Compatibility Group": row["Compatibility Group"],
                 "Earliest Due Date": row["Earliest Due Date"],
                 "Latest Due Date": row["Latest Due Date"],
+                "Target Pour Date": row["Target Pour Date"],
+                "Pour Buffer Days": row["Pour Buffer Days"],
+                "Due Buffer Status": row["Due Buffer Status"],
                 "Total Weight (lbs)": row["Total Weight (lbs)"],
                 "Total Molds": row["Total Molds"],
                 "Jobs": row["Jobs"],
                 "Extensions": row["Extensions"],
+                "Planner Diagnostic": row["Planner Diagnostic"],
                 "Manual Alloy": "",
                 "Manual Weight (lbs)": "",
                 "Manual Molds": "",
@@ -399,6 +536,7 @@ def build_heat_daily_totals_rows(summary_rows):
             OverflowHeats=("Heat Status", lambda values: int((values == "Overflow").sum())),
             TotalWeightLbs=("Total Weight (lbs)", "sum"),
             TotalMolds=("Total Molds", "sum"),
+            AtRiskHeats=("Due Buffer Status", lambda values: int((values == "AT RISK").sum())),
         )
         .reset_index()
     )
@@ -414,6 +552,7 @@ def build_heat_daily_totals_rows(summary_rows):
                 "Overflow Heats": int(row["OverflowHeats"]),
                 "Total Weight (lbs)": float(row["TotalWeightLbs"]),
                 "Total Molds": float(row["TotalMolds"]),
+                "At-Risk Heats": int(row["AtRiskHeats"]),
             }
         )
 
@@ -422,11 +561,12 @@ def build_heat_daily_totals_rows(summary_rows):
 
 def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx"):
     """
-    Write the heat summary workbook with two sheets.
+    Write the heat summary workbook.
 
-    Sheet 1 "Heat Summary"       – dated heat-plan rows including reserved slot.
-    Sheet 2 "Daily Heat Totals"  – one row per day with aggregate counts.
-    Sheet 3 "Heat Planner"       – planner-facing worksheet with manual fill columns.
+    Sheet 1 "Heat Summary"          – day-block melt schedule layout.
+    Sheet 2 "Daily Heat Totals"     – one row per day with aggregate counts.
+    Sheet 3 "Due Buffer Compliance" – 14-day target compliance diagnostics.
+    Sheet 4 "Heat Planner"          – planner-facing worksheet with manual fill columns.
 
     Args:
         melt_schedule: Output of build_melt_schedule.
@@ -451,12 +591,16 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Compatibility Group",
             "Earliest Due Date",
             "Latest Due Date",
+            "Target Pour Date",
+            "Pour Buffer Days",
+            "Due Buffer Status",
             "Total Weight (lbs)",
             "Total Molds",
             "Rows in Heat",
             "Jobs",
             "Extensions",
             "Job Breakout",
+            "Planner Diagnostic",
         ]
 
         bold = Font(bold=True)
@@ -467,69 +611,104 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             bottom=Side(style="thin"),
         )
 
-        for col_num, header in enumerate(headers, start=1):
-            cell = ws.cell(1, col_num, header)
-            cell.font = bold
-            cell.border = thin
-
         summary_rows = build_heat_summary_rows((melt_schedule, day_dates))
-        current_row = 2
+        current_row = 1
 
-        for row in summary_rows:
-            values = [
-                row["Schedule Date"],
-                row["Weekday"],
-                row["Heat Slot"],
-                row["Heat #"],
-                row["Heat Status"],
-                row["Planning Priority"],
-                row["Review Window"],
-                row["Anchor Alloy"],
-                row["Compatibility Group"],
-                row["Earliest Due Date"],
-                row["Latest Due Date"],
-                row["Total Weight (lbs)"],
-                row["Total Molds"],
-                row["Rows in Heat"],
-                row["Jobs"],
-                row["Extensions"],
-                row["Job Breakout"],
-            ]
+        summary_df = pd.DataFrame(summary_rows)
+        if not summary_df.empty:
+            grouped = summary_df.groupby(["Schedule Date", "Weekday"], sort=True)
+            for (schedule_date, weekday), day_df in grouped:
+                ws.cell(current_row, 1, "Melt Schedule")
+                ws.cell(current_row, 2, schedule_date)
+                ws.cell(current_row, 4, weekday)
+                ws.cell(current_row, 2).number_format = "m/d/yyyy"
+                for col in range(1, len(headers) + 1):
+                    ws.cell(current_row, col).font = bold
 
-            for col_num, value in enumerate(values, start=1):
-                cell = ws.cell(current_row, col_num, value)
-                cell.border = thin
-                if col_num in {1, 10, 11} and value != "":
-                    cell.number_format = "m/d/yyyy"
-                if col_num == 12:
-                    cell.number_format = "#,##0.00"
-                if col_num == 13:
-                    cell.number_format = "#,##0"
+                current_row += 2
 
-            current_row += 1
+                for col_num, header in enumerate(headers, start=1):
+                    cell = ws.cell(current_row, col_num, header)
+                    cell.font = bold
+                    cell.border = thin
+
+                current_row += 1
+
+                for _, row in day_df.iterrows():
+                    values = [
+                        row["Schedule Date"],
+                        row["Weekday"],
+                        row["Heat Slot"],
+                        row["Heat #"],
+                        row["Heat Status"],
+                        row["Planning Priority"],
+                        row["Review Window"],
+                        row["Anchor Alloy"],
+                        row["Compatibility Group"],
+                        row["Earliest Due Date"],
+                        row["Latest Due Date"],
+                        row["Target Pour Date"],
+                        row["Pour Buffer Days"],
+                        row["Due Buffer Status"],
+                        row["Total Weight (lbs)"],
+                        row["Total Molds"],
+                        row["Rows in Heat"],
+                        row["Jobs"],
+                        row["Extensions"],
+                        row["Job Breakout"],
+                        row["Planner Diagnostic"],
+                    ]
+
+                    for col_num, value in enumerate(values, start=1):
+                        cell = ws.cell(current_row, col_num, value)
+                        cell.border = thin
+                        if col_num in {1, 10, 11, 12} and value != "":
+                            cell.number_format = "m/d/yyyy"
+                        if col_num == 15:
+                            cell.number_format = "#,##0.00"
+                        if col_num == 16:
+                            cell.number_format = "#,##0"
+                        if col_num in {20, 21}:
+                            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+                    current_row += 1
+
+                ws.cell(current_row, 1, "TOTALS")
+                ws.cell(current_row, 15, float(day_df["Total Weight (lbs)"].sum()))
+                ws.cell(current_row, 16, float(day_df["Total Molds"].sum()))
+                ws.cell(current_row, 1).font = bold
+                ws.cell(current_row, 15).font = bold
+                ws.cell(current_row, 16).font = bold
+                current_row += 3
 
         widths = {
-            "A": 14,
-            "B": 12,
-            "C": 10,
-            "D": 8,
-            "E": 12,
-            "F": 18,
-            "G": 15,
-            "H": 15,
-            "I": 18,
-            "J": 14,
-            "K": 14,
-            "L": 18,
-            "M": 12,
-            "N": 12,
-            "O": 24,
-            "P": 28,
-            "Q": 60,
+            "A": 11,
+            "B": 11,
+            "C": 8,
+            "D": 7,
+            "E": 11,
+            "F": 13,
+            "G": 12,
+            "H": 10,
+            "I": 12,
+            "J": 10,
+            "K": 10,
+            "L": 10,
+            "M": 9,
+            "N": 11,
+            "O": 12,
+            "P": 10,
+            "Q": 9,
+            "R": 16,
+            "S": 18,
+            "T": 30,
+            "U": 26,
         }
 
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws)
 
         ws_daily = wb.create_sheet("Daily Heat Totals")
         daily_headers = [
@@ -538,6 +717,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Total Heats",
             "Planned Heats",
             "Overflow Heats",
+            "At-Risk Heats",
             "Total Weight (lbs)",
             "Total Molds",
         ]
@@ -557,6 +737,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 row["Total Heats"],
                 row["Planned Heats"],
                 row["Overflow Heats"],
+                row["At-Risk Heats"],
                 row["Total Weight (lbs)"],
                 row["Total Molds"],
             ]
@@ -566,9 +747,9 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 cell.border = thin
                 if col_num == 1 and value != "":
                     cell.number_format = "m/d/yyyy"
-                if col_num == 6:
-                    cell.number_format = "#,##0.00"
                 if col_num == 7:
+                    cell.number_format = "#,##0.00"
+                if col_num == 8:
                     cell.number_format = "#,##0"
 
             current_row += 1
@@ -577,16 +758,79 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "A": 14,
             "B": 12,
             "C": 12,
-            "D": 18,
-            "E": 12,
             "D": 12,
             "E": 13,
-            "F": 18,
-            "G": 12,
+            "F": 13,
+            "G": 18,
+            "H": 12,
         }
 
         for col, width in daily_widths.items():
             ws_daily.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws_daily)
+
+        ws_compliance = wb.create_sheet("Due Buffer Compliance")
+        compliance_headers = [
+            "Schedule Date",
+            "Weekday",
+            "Heat #",
+            "Anchor Alloy",
+            "Earliest Due Date",
+            "Target Pour Date",
+            "Pour Buffer Days",
+            "Due Buffer Status",
+            "Planner Diagnostic",
+        ]
+
+        for col_num, header in enumerate(compliance_headers, start=1):
+            cell = ws_compliance.cell(1, col_num, header)
+            cell.font = bold
+            cell.border = thin
+
+        compliance_rows = [
+            row for row in summary_rows
+            if str(row.get("Heat Status", "")) != "Reserved"
+        ]
+        current_row = 2
+
+        for row in compliance_rows:
+            values = [
+                row["Schedule Date"],
+                row["Weekday"],
+                row["Heat #"],
+                row["Anchor Alloy"],
+                row["Earliest Due Date"],
+                row["Target Pour Date"],
+                row["Pour Buffer Days"],
+                row["Due Buffer Status"],
+                row["Planner Diagnostic"],
+            ]
+            for col_num, value in enumerate(values, start=1):
+                cell = ws_compliance.cell(current_row, col_num, value)
+                cell.border = thin
+                if col_num in {1, 5, 6} and value != "":
+                    cell.number_format = "m/d/yyyy"
+                if col_num == 9:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+            current_row += 1
+
+        compliance_widths = {
+            "A": 14,
+            "B": 12,
+            "C": 8,
+            "D": 12,
+            "E": 14,
+            "F": 14,
+            "G": 12,
+            "H": 14,
+            "I": 34,
+        }
+
+        for col, width in compliance_widths.items():
+            ws_compliance.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws_compliance)
 
         ws_planner = wb.create_sheet("Heat Planner")
         planner_headers = [
@@ -601,10 +845,14 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Compatibility Group",
             "Earliest Due Date",
             "Latest Due Date",
+            "Target Pour Date",
+            "Pour Buffer Days",
+            "Due Buffer Status",
             "Total Weight (lbs)",
             "Total Molds",
             "Jobs",
             "Extensions",
+            "Planner Diagnostic",
             "Manual Alloy",
             "Manual Weight (lbs)",
             "Manual Molds",
@@ -632,10 +880,14 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 row["Compatibility Group"],
                 row["Earliest Due Date"],
                 row["Latest Due Date"],
+                row["Target Pour Date"],
+                row["Pour Buffer Days"],
+                row["Due Buffer Status"],
                 row["Total Weight (lbs)"],
                 row["Total Molds"],
                 row["Jobs"],
                 row["Extensions"],
+                row["Planner Diagnostic"],
                 row["Manual Alloy"],
                 row["Manual Weight (lbs)"],
                 row["Manual Molds"],
@@ -645,12 +897,14 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             for col_num, value in enumerate(values, start=1):
                 cell = ws_planner.cell(current_row, col_num, value)
                 cell.border = thin
-                if col_num in {1, 10, 11} and value != "":
+                if col_num in {1, 10, 11, 12} and value != "":
                     cell.number_format = "m/d/yyyy"
-                if col_num in {12, 17} and value != "":
+                if col_num in {15, 21} and value != "":
                     cell.number_format = "#,##0.00"
-                if col_num in {13, 18} and value != "":
+                if col_num in {16, 22} and value != "":
                     cell.number_format = "#,##0"
+                if col_num in {20, 25}:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
 
             current_row += 1
 
@@ -666,18 +920,24 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "I": 18,
             "J": 14,
             "K": 14,
-            "L": 18,
+            "L": 14,
             "M": 12,
-            "N": 24,
-            "O": 28,
-            "P": 15,
-            "Q": 18,
-            "R": 14,
-            "S": 28,
+            "N": 14,
+            "O": 18,
+            "P": 12,
+            "Q": 24,
+            "R": 28,
+            "S": 30,
+            "T": 15,
+            "U": 18,
+            "V": 14,
+            "W": 28,
         }
 
         for col, width in planner_widths.items():
             ws_planner.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws_planner)
 
         wb.save(output_file)
         print(f"Saved: {output_file}")

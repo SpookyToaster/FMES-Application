@@ -135,7 +135,11 @@ def schedule_molds():
             day: mold_schedule_frame[mold_schedule_frame["Schedule Day"] == day].copy()
             for day in sorted(mold_schedule_frame["Schedule Day"].unique())
         }
-        export_blocks = build_daily_export_blocks(daily_schedules, mold_day_dates)
+        export_blocks = build_daily_export_blocks(
+            daily_schedules,
+            mold_day_dates,
+            pour_day_dates=pour_day_dates,
+        )
         print_export_blocks(export_blocks)
 
         logger.info("      Schedule spans %s production day(s).", len(export_blocks))

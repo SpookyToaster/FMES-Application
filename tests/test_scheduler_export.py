@@ -223,11 +223,15 @@ class SchedulerExportTests(unittest.TestCase):
                 "Compatibility Group": "",
                 "Earliest Due Date": "",
                 "Latest Due Date": "",
+                "Target Pour Date": "",
+                "Pour Buffer Days": None,
+                "Due Buffer Status": "",
                 "Total Weight (lbs)": 0.0,
                 "Total Molds": 0.0,
                 "Rows in Heat": 0,
                 "Jobs": "",
                 "Extensions": "",
+                "Planner Diagnostic": "",
             }
         ]
 
@@ -316,13 +320,14 @@ class SchedulerExportTests(unittest.TestCase):
 
             wb = load_workbook(output_file)
             ws = wb["Heat Summary"]
-            self.assertEqual(ws.cell(1, 1).value, "Schedule Date")
-            self.assertEqual(ws.cell(1, 3).value, "Heat Slot")
-            self.assertEqual(ws.cell(2, 3).value, 1)
-            self.assertEqual(ws.cell(2, 8).value, "LEW15")
-            self.assertEqual(ws.cell(1, 17).value, "Job Breakout")
+            self.assertEqual(ws.cell(1, 1).value, "Melt Schedule")
+            self.assertEqual(ws.cell(3, 1).value, "Schedule Date")
+            self.assertEqual(ws.cell(3, 3).value, "Heat Slot")
+            self.assertEqual(ws.cell(4, 3).value, 1)
+            self.assertEqual(ws.cell(4, 8).value, "LEW15")
+            self.assertEqual(ws.cell(3, 20).value, "Job Breakout")
             self.assertEqual(
-                ws.cell(2, 17).value,
+                ws.cell(4, 20).value,
                 "5001-A | Due 08/04/2026 | Molds 2",
             )
 
@@ -332,12 +337,17 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_daily.cell(2, 3).value, 2)
             self.assertEqual(ws_daily.cell(2, 4).value, 1)
             self.assertEqual(ws_daily.cell(2, 5).value, 1)
-            self.assertEqual(ws_daily.cell(2, 6).value, 1000)
+            self.assertEqual(ws_daily.cell(2, 6).value, 2)
+            self.assertEqual(ws_daily.cell(2, 7).value, 1000)
+
+            ws_compliance = wb["Due Buffer Compliance"]
+            self.assertEqual(ws_compliance.cell(1, 8).value, "Due Buffer Status")
+            self.assertEqual(ws_compliance.cell(2, 8).value, "AT RISK")
 
             ws_planner = wb["Heat Planner"]
-            self.assertEqual(ws_planner.cell(1, 16).value, "Manual Alloy")
+            self.assertEqual(ws_planner.cell(1, 20).value, "Manual Alloy")
             self.assertEqual(ws_planner.cell(4, 3).value, 6)
-            self.assertEqual(ws_planner.cell(4, 16).value, None)
+            self.assertEqual(ws_planner.cell(4, 20).value, None)
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
         melt_schedule = {
@@ -362,6 +372,7 @@ class SchedulerExportTests(unittest.TestCase):
                 "Heat #": 1,
                 "Heat Status": "Planned",
                 "Anchor Alloy": "LEW15",
+                "Due Buffer Status": "AT RISK",
                 "Total Weight (lbs)": 600.0,
                 "Total Molds": 2.0,
                 "Rows in Heat": 1,
@@ -373,6 +384,7 @@ class SchedulerExportTests(unittest.TestCase):
                 "Heat #": 2,
                 "Heat Status": "Overflow",
                 "Anchor Alloy": "WCB",
+                "Due Buffer Status": "ON TRACK",
                 "Total Weight (lbs)": 900.0,
                 "Total Molds": 3.0,
                 "Rows in Heat": 2,
@@ -384,6 +396,7 @@ class SchedulerExportTests(unittest.TestCase):
                 "Heat #": "",
                 "Heat Status": "Reserved",
                 "Anchor Alloy": "",
+                "Due Buffer Status": "",
                 "Total Weight (lbs)": 0.0,
                 "Total Molds": 0.0,
                 "Rows in Heat": 0,
@@ -395,6 +408,7 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(daily_rows[0]["Total Heats"], 2)
         self.assertEqual(daily_rows[0]["Planned Heats"], 1)
         self.assertEqual(daily_rows[0]["Overflow Heats"], 1)
+        self.assertEqual(daily_rows[0]["At-Risk Heats"], 1)
         self.assertEqual(daily_rows[0]["Total Weight (lbs)"], 1500.0)
         self.assertEqual(daily_rows[0]["Total Molds"], 5.0)
 
