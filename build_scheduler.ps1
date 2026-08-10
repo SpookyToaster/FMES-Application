@@ -1,5 +1,6 @@
 param(
-    [string]$VersionLabel = $(Get-Date -Format 'yyyyMMdd_HHmmss')
+    [string]$VersionLabel = $(Get-Date -Format 'yyyyMMdd_HHmmss'),
+    [int]$KeepReleases = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +35,17 @@ Executable: $versionedExe
     Write-Host 'Built release files:'
     Write-Host $versionedExe
     Write-Host (Join-Path $releasePath 'build-info.txt')
+
+    # Work/dist folders are throwaway; releases keep only the newest $KeepReleases.
+    Get-ChildItem -Directory $artifactRoot |
+        Where-Object { $_.Name -match '^(build|dist)_' -and $_.FullName -ne $workPath -and $_.FullName -ne $distPath } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    Get-ChildItem -Directory $artifactRoot |
+        Where-Object { $_.Name -match '^release_' } |
+        Sort-Object Name -Descending |
+        Select-Object -Skip $KeepReleases |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 finally {
     Pop-Location
