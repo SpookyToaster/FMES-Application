@@ -97,14 +97,19 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
         logger.info("[1/4] Skipping database check (Excel source).")
 
     logger.info("[2/4] Building mold schedule...")
-    export_blocks = schedule_molds()
+    schedule_result = schedule_molds()
+    export_blocks = schedule_result["export_blocks"]
 
     logger.info("[3/4] Writing Mold Schedule workbook...")
     export_mold_schedule(export_blocks, output_file)
     logger.info("      Saved: %s", output_file)
 
     logger.info("[4/4] Writing Heat Summary workbook...")
-    export_heat_summary(export_blocks, heat_output_file)
+    export_heat_summary(
+        schedule_result["melt_schedule"],
+        schedule_result["day_dates"],
+        heat_output_file,
+    )
     logger.info("      Saved: %s", heat_output_file)
 
     return {

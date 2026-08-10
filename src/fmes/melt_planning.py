@@ -15,6 +15,82 @@ MAX_PLANNED_HEATS_PER_DAY = 5
 RESERVED_HEAT_SLOT_COUNT = 1
 MAX_TOTAL_HEAT_SLOTS_PER_DAY = MAX_PLANNED_HEATS_PER_DAY + RESERVED_HEAT_SLOT_COUNT
 HEAT_WEIGHT_LIMIT_LBS = 2300
+HEAT_MOLD_LIMIT = 10
+HIGHEST_PRIORITY_WINDOW_DAYS = 14
+PRIORITY_REVIEW_WINDOW_DAYS = 56
+
+
+def _normalize_due_date(value):
+    """Return normalized Timestamp for a due date value, or NaT when unavailable."""
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return pd.NaT
+    return pd.Timestamp(parsed).normalize()
+
+
+def _normalize_reference_date(reference_date=None):
+    """Return the normalized reference date used for planning priority windows."""
+    if reference_date is None:
+        return pd.Timestamp.today().normalize()
+    return pd.Timestamp(reference_date).normalize()
+
+
+def _priority_metadata_for_due_date(due_date, reference_date):
+    """Classify a due date into planning priority windows."""
+    if pd.isna(due_date):
+        return 2, "Standard", "Outside 8 Weeks", None
+
+    days_until_due = int((due_date - reference_date).days)
+    if days_until_due <= HIGHEST_PRIORITY_WINDOW_DAYS:
+        return 0, "Highest Priority", "Next 2 Weeks", days_until_due
+    if days_until_due <= PRIORITY_REVIEW_WINDOW_DAYS:
+        return 1, "Priority Review", "Next 8 Weeks", days_until_due
+    return 2, "Standard", "Outside 8 Weeks", days_until_due
+
+
+def prioritize_schedule_rows(schedule_df, reference_date=None):
+    """Annotate and sort schedule rows for review and scheduling priority."""
+    if schedule_df.empty:
+        prioritized = schedule_df.copy()
+        prioritized["Planning Priority Rank"] = []
+        prioritized["Planning Priority"] = []
+        prioritized["Review Window"] = []
+        prioritized["Days Until Due"] = []
+        prioritized["Due Date Sort"] = []
+        return prioritized
+
+    reference_date = _normalize_reference_date(reference_date)
+    prioritized = schedule_df.copy()
+    prioritized["Due Date Sort"] = prioritized[Columns.COL_DUE_DATE].apply(_normalize_due_date)
+
+    priority_rows = prioritized["Due Date Sort"].apply(
+        lambda due_date: _priority_metadata_for_due_date(due_date, reference_date)
+    )
+    prioritized["Planning Priority Rank"] = priority_rows.apply(lambda value: value[0])
+    prioritized["Planning Priority"] = priority_rows.apply(lambda value: value[1])
+    prioritized["Review Window"] = priority_rows.apply(lambda value: value[2])
+    prioritized["Days Until Due"] = priority_rows.apply(lambda value: value[3])
+
+    if ALLOY_COMPATIBILITY_GROUP_COLUMN not in prioritized.columns:
+        prioritized[ALLOY_COMPATIBILITY_GROUP_COLUMN] = prioritized[Columns.COL_ALLOY].fillna("")
+
+    if "Extension_Seq" not in prioritized.columns:
+        prioritized["Extension_Seq"] = 0
+
+    prioritized = prioritized.sort_values(
+        by=[
+            "Planning Priority Rank",
+            "Due Date Sort",
+            ALLOY_COMPATIBILITY_GROUP_COLUMN,
+            Columns.COL_ALLOY,
+            Columns.COL_JOB_NUMBER,
+            "Extension_Seq",
+        ],
+        ascending=[True, True, True, True, True, True],
+        na_position="last",
+    ).reset_index(drop=True)
+
+    return prioritized
 
 
 def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
@@ -31,6 +107,13 @@ def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
         if job_number:
             extensions.append(f"{job_number}-{ext}" if ext else job_number)
 
+    due_dates = heat_df.get("Due Date Sort", pd.Series(dtype="datetime64[ns]"))
+    valid_due_dates = due_dates.dropna()
+    earliest_due_date = valid_due_dates.min().date() if not valid_due_dates.empty else ""
+    latest_due_date = valid_due_dates.max().date() if not valid_due_dates.empty else ""
+    priority_rank = int(heat_df["Planning Priority Rank"].min())
+    priority_row = heat_df[heat_df["Planning Priority Rank"] == priority_rank].iloc[0]
+
     return {
         "Schedule Day": day,
         "Heat #": heat_number,
@@ -38,8 +121,13 @@ def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
         "Heat Status": "Planned" if heat_number <= max_planned_heats_per_day else "Overflow",
         "Anchor Alloy": str(first_row.get(Columns.COL_ALLOY, "") or "").strip(),
         "Compatibility Group": str(first_row.get(ALLOY_COMPATIBILITY_GROUP_COLUMN, "") or "").strip(),
+        "Planning Priority": str(priority_row.get("Planning Priority", "") or "").strip(),
+        "Review Window": str(priority_row.get("Review Window", "") or "").strip(),
+        "Earliest Due Date": earliest_due_date,
+        "Latest Due Date": latest_due_date,
         "Total Weight (lbs)": float(heat_df["Total Weight per EXT"].fillna(0).sum()),
         "Total Molds": float(heat_df["Molds for EXT"].fillna(0).sum()),
+        "Rows in Heat": int(len(heat_df)),
         "Jobs": ", ".join(jobs),
         "Extensions": ", ".join(extensions),
     }
@@ -50,6 +138,8 @@ def build_melt_schedule(
     max_planned_heats_per_day=MAX_PLANNED_HEATS_PER_DAY,
     reserved_heat_slot_count=RESERVED_HEAT_SLOT_COUNT,
     heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS,
+    heat_mold_limit=HEAT_MOLD_LIMIT,
+    reference_date=None,
 ):
     """
     Build an initial melt schedule from day-assigned open-order extensions.
@@ -61,16 +151,17 @@ def build_melt_schedule(
         return {}
 
     melt_schedule = {}
+    reference_date = _normalize_reference_date(reference_date)
 
     for day in sorted(schedule_df["Schedule Day"].dropna().unique()):
-        day_df = (
-            schedule_df[schedule_df["Schedule Day"] == day]
-            .copy()
-            .sort_values(by=[Columns.COL_ALLOY, Columns.COL_JOB_NUMBER, "Extension_Seq"])
-            .reset_index(drop=True)
-        )
+        day_df = schedule_df[schedule_df["Schedule Day"] == day].copy()
+        day_df = prioritize_schedule_rows(day_df, reference_date=reference_date)
 
-        planned_rows = assign_heat_numbers(day_df, heat_weight_limit_lbs=heat_weight_limit_lbs)
+        planned_rows = assign_heat_numbers(
+            day_df,
+            heat_weight_limit_lbs=heat_weight_limit_lbs,
+            heat_mold_limit=heat_mold_limit,
+        )
 
         summary_rows = []
         if not planned_rows.empty:
@@ -94,8 +185,13 @@ def build_melt_schedule(
                     "Heat Status": "Reserved",
                     "Anchor Alloy": "",
                     "Compatibility Group": "",
+                    "Planning Priority": "",
+                    "Review Window": "",
+                    "Earliest Due Date": "",
+                    "Latest Due Date": "",
                     "Total Weight (lbs)": 0.0,
                     "Total Molds": 0.0,
+                    "Rows in Heat": 0,
                     "Jobs": "",
                     "Extensions": "",
                 }
@@ -150,7 +246,11 @@ def _build_compatibility_map_from_frame(day_df):
     return compatibility_map
 
 
-def assign_heat_numbers(day_df, heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS):
+def assign_heat_numbers(
+    day_df,
+    heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS,
+    heat_mold_limit=HEAT_MOLD_LIMIT,
+):
     """Assign per-day heat numbers using alloy compatibility and weight limits."""
     if day_df.empty:
         day_df["Heat #"] = []
@@ -160,12 +260,15 @@ def assign_heat_numbers(day_df, heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS):
     heat_numbers = []
     heat_number = 0
     current_heat_weight = 0.0
+    current_heat_molds = 0
     heat_anchor_alloy = None
 
     for _, row in day_df.iterrows():
         alloy = str(row.get(Columns.COL_ALLOY, "") or "")
         row_weight = float(row.get("Total Weight per EXT", 0) or 0)
         row_weight = max(row_weight, 0)
+        row_molds = int(pd.to_numeric(row.get("Molds for EXT", 0), errors="coerce") or 0)
+        row_molds = max(row_molds, 0)
 
         needs_new_heat = False
         if heat_anchor_alloy is None:
@@ -176,15 +279,19 @@ def assign_heat_numbers(day_df, heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS):
             compatibility_map=compatibility_map,
         ):
             needs_new_heat = True
-        elif current_heat_weight + row_weight > heat_weight_limit_lbs:
+        elif current_heat_weight > 0 and current_heat_weight + row_weight > heat_weight_limit_lbs:
+            needs_new_heat = True
+        elif current_heat_molds > 0 and current_heat_molds + row_molds > heat_mold_limit:
             needs_new_heat = True
 
         if needs_new_heat:
             heat_number += 1
             heat_anchor_alloy = alloy
             current_heat_weight = 0.0
+            current_heat_molds = 0
 
         current_heat_weight += row_weight
+        current_heat_molds += row_molds
         heat_numbers.append(heat_number)
 
     day_df = day_df.copy()
