@@ -10,15 +10,15 @@ import shutil
 
 import pandas as pd
 
-from .alloy_compatibility import (
+from alloy_compatibility import (
     DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH,
     apply_alloy_compatibility,
     load_alloy_compatibility_map,
 )
-from .config import Columns, Paths
-from .db_io import get_main_dashboard_scheduler_rows
-from .scheduler_validation import validate_sql_rows
-from .workbook_sync import (
+from config import Columns, Paths
+from DB_IO import get_main_dashboard_scheduler_rows
+from scheduler_validation import validate_sql_rows
+from workbook_sync import (
     export_worksheet_values,
     save_sql_snapshot,
     write_sql_data_to_oor,

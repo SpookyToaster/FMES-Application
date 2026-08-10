@@ -1,7 +1,7 @@
 """Database input/output functions."""
 
-from Database import connect
-from scheduler_validation import append_missing_job_id_audit
+from .database import connect
+from .scheduler_validation import append_missing_job_id_audit
 
 
 MAIN_DASHBOARD_SQL = """

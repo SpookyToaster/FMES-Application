@@ -11,7 +11,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Border, Font, Side
 import pandas as pd
 
-from .config import Columns
+from config import Columns
 
 
 def _normalize_due_date(value):

@@ -4,10 +4,10 @@ import unittest
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config import Columns
-from scheduler_build import Assign_days, Build_Daily_Schedules, Build_Schedule_Dates, Build_Schedule_Rows, Expand_Job, get_extensions
+from fmes.config import Columns
+from fmes.scheduler_build import assign_days, build_daily_schedules, build_schedule_dates, build_schedule_rows, expand_job, get_extensions
 
 
 class SchedulerBuildTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class SchedulerBuildTests(unittest.TestCase):
 
         self.assertEqual(get_extensions(1), [""])
 
-        expanded = Expand_Job(job)
+        expanded = expand_job(job)
         self.assertEqual(len(expanded), 3)
         self.assertEqual(expanded[0]["EXT"], "A")
         self.assertEqual(expanded[1]["EXT"], "B")
@@ -30,7 +30,7 @@ class SchedulerBuildTests(unittest.TestCase):
         self.assertEqual([row["Molds for EXT"] for row in expanded], [10, 10, 4])
 
     def test_assign_days_and_daily_schedules(self):
-        schedule_rows = Build_Schedule_Rows([
+        schedule_rows = build_schedule_rows([
             pd.Series({
                 Columns.COL_JOB_NUMBER: "4001",
                 Columns.COL_MOLDS_NEEDED: 2,
@@ -47,15 +47,15 @@ class SchedulerBuildTests(unittest.TestCase):
         ])
 
         frame = pd.DataFrame(schedule_rows)
-        framed = Assign_days(frame)
+        framed = assign_days(frame)
 
         self.assertIn("Schedule Day", framed.columns)
         self.assertEqual(int(framed.iloc[0]["Schedule Day"]), 1)
 
-        daily_schedules = Build_Daily_Schedules(framed)
+        daily_schedules = build_daily_schedules(framed)
         self.assertEqual(list(daily_schedules.keys()), [1])
 
-        day_dates = Build_Schedule_Dates(daily_schedules, pd.Timestamp("2026-08-03"))
+        day_dates = build_schedule_dates(daily_schedules, pd.Timestamp("2026-08-03"))
         self.assertIn(1, day_dates)
 
     def test_expand_job_preserves_remaining_extensions_after_partial_completion(self):
@@ -68,7 +68,7 @@ class SchedulerBuildTests(unittest.TestCase):
             Columns.COL_ALLOY: "A",
         })
 
-        expanded = Expand_Job(job)
+        expanded = expand_job(job)
 
         self.assertEqual([row["EXT"] for row in expanded], ["B", "L"])
         self.assertEqual([row["Molds for EXT"] for row in expanded], [10, 4])
@@ -88,7 +88,7 @@ class SchedulerBuildTests(unittest.TestCase):
             }
         ])
 
-        assigned = Assign_days(schedule_df)
+        assigned = assign_days(schedule_df)
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
         self.assertEqual(assigned["EXT"].tolist(), ["A", "A"])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4])
@@ -104,11 +104,11 @@ class SchedulerBuildTests(unittest.TestCase):
             "Part Number": "P7",
         })
 
-        expanded = Expand_Job(job)
+        expanded = expand_job(job)
         self.assertEqual([row["EXT"] for row in expanded], ["B", "L"])
         self.assertEqual([int(row["Molds for EXT"]) for row in expanded], [10, 4])
 
-        assigned = Assign_days(pd.DataFrame(expanded))
+        assigned = assign_days(pd.DataFrame(expanded))
         self.assertEqual(assigned["EXT"].tolist(), ["B", "B", "L", "L"])
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2, 2, 3])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4, 2, 2])
@@ -159,7 +159,7 @@ class SchedulerBuildTests(unittest.TestCase):
             },
         ])
 
-        daily_schedules = Build_Daily_Schedules(schedule_df)
+        daily_schedules = build_daily_schedules(schedule_df)
         day1 = daily_schedules[1]
 
         self.assertIn("Heat #", day1.columns)
@@ -189,7 +189,7 @@ class SchedulerBuildTests(unittest.TestCase):
             },
         ])
 
-        daily_schedules = Build_Daily_Schedules(schedule_df)
+        daily_schedules = build_daily_schedules(schedule_df)
         day1 = daily_schedules[1]
 
         self.assertEqual(day1["Heat #"].tolist(), [1, 1])

@@ -7,15 +7,15 @@ from unittest.mock import patch
 from openpyxl import Workbook, load_workbook
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from alloy_compatibility import can_alloy_share_heat_with
-from scheduler_io import (
-    Read_File,
+from fmes.alloy_compatibility import can_alloy_share_heat_with
+from fmes.scheduler_io import (
+    read_file,
     SQL_MAIN_EXPORT_COLUMNS,
-    Sync_Open_Order_Report_With_SQL,
+    sync_open_order_report_with_sql,
 )
-from workbook_sync import restore_ignorable_namespace_declarations
+from fmes.workbook_sync import restore_ignorable_namespace_declarations
 
 
 class SchedulerIOTests(unittest.TestCase):
@@ -37,8 +37,8 @@ class SchedulerIOTests(unittest.TestCase):
     def test_read_file_strips_headers(self):
         frame = pd.DataFrame(columns=[" Job Number ", " Due Date "])
 
-        with patch("scheduler_io.pd.read_excel", return_value=frame):
-            result = Read_File("sample.xlsx")
+        with patch("fmes.scheduler_io.pd.read_excel", return_value=frame):
+            result = read_file("sample.xlsx")
 
         self.assertEqual(list(result.columns)[:2], ["Job Number", "Due Date"])
         self.assertIn("Compatibility Group", result.columns)
@@ -46,9 +46,9 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertIn("Specific Compatible Alloys", result.columns)
 
     def test_read_file_wraps_failures(self):
-        with patch("scheduler_io.pd.read_excel", side_effect=FileNotFoundError("missing")):
+        with patch("fmes.scheduler_io.pd.read_excel", side_effect=FileNotFoundError("missing")):
             with self.assertRaises(RuntimeError) as context:
-                Read_File(filepath="missing.xlsx", source="excel")
+                read_file(filepath="missing.xlsx", source="excel")
 
         self.assertIn("Failed to read schedule input", str(context.exception))
 
@@ -70,17 +70,17 @@ class SchedulerIOTests(unittest.TestCase):
             }
         ]
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
-            frame = Read_File(source="sql")
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
 
         self.assertEqual(frame.iloc[0]["Molds Needed"], 7)
         self.assertEqual(frame.iloc[0]["Hold"], "NO")
         self.assertEqual(frame.iloc[0]["Scheduled"], "NO")
 
     def test_read_file_sql_wraps_failures(self):
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):
             with self.assertRaises(RuntimeError) as context:
-                Read_File(source="sql")
+                read_file(source="sql")
 
         self.assertIn("Failed to read schedule input from SQL", str(context.exception))
 
@@ -116,8 +116,8 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
-            frame = Read_File(source="sql")
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
 
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["Customer Name"], "Customer B")
@@ -140,9 +140,9 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
             with self.assertRaises(RuntimeError) as context:
-                Read_File(source="sql")
+                read_file(source="sql")
 
         message = str(context.exception)
         self.assertIn("SQL scheduler input validation failed", message)
@@ -150,9 +150,9 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertIn("Part Number", message)
 
     def test_read_file_sql_reports_zero_matched_rows(self):
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=[]):
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=[]):
             with self.assertRaises(RuntimeError) as context:
-                Read_File(source="sql")
+                read_file(source="sql")
 
         self.assertIn("No rows were returned", str(context.exception))
 
@@ -174,8 +174,8 @@ class SchedulerIOTests(unittest.TestCase):
             },
         ]
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
-            frame = Read_File(source="sql")
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
 
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["Job Number"], "VUPN")
@@ -228,10 +228,10 @@ class SchedulerIOTests(unittest.TestCase):
             ]
         )
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
-            "scheduler_io.pd.read_csv", return_value=compatibility_frame
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
+            "fmes.scheduler_io.pd.read_csv", return_value=compatibility_frame
         ):
-            frame = Read_File(source="sql")
+            frame = read_file(source="sql")
 
         self.assertEqual(frame.iloc[0]["Compatibility Group"], "A216")
         self.assertEqual(frame.iloc[0]["Compatible With ASTM Group"], "YES")
@@ -288,10 +288,10 @@ class SchedulerIOTests(unittest.TestCase):
             ]
         )
 
-        with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
-            "scheduler_io.pd.read_csv", return_value=compatibility_frame
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
+            "fmes.scheduler_io.pd.read_csv", return_value=compatibility_frame
         ):
-            frame = Read_File(source="sql")
+            frame = read_file(source="sql")
 
         self.assertEqual(frame.iloc[0]["Compatibility Group"], "A351")
         self.assertEqual(frame.iloc[0]["Specific Compatible Alloys"], "CF3M")
@@ -397,8 +397,8 @@ class SchedulerIOTests(unittest.TestCase):
                 }
             ]
 
-            with patch("scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
-                result = Sync_Open_Order_Report_With_SQL(
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+                result = sync_open_order_report_with_sql(
                     source_workbook_path=str(source_path),
                     backup_dir=str(backup_dir),
                     historical_oor_dir=str(hist_dir),

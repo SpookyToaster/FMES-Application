@@ -16,8 +16,8 @@ from datetime import timedelta
 
 import pandas as pd
 
-from .config import Columns, DailyMoldLimits
-from .melt_planning import HEAT_WEIGHT_LIMIT_LBS, assign_heat_numbers
+from config import Columns, DailyMoldLimits
+from melt_planning import HEAT_WEIGHT_LIMIT_LBS, assign_heat_numbers
 
 
 EXTENSION_WEIGHT_LIMIT_LBS = 2300

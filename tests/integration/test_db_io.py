@@ -2,10 +2,10 @@ import sys
 from pathlib import Path
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from Database import validate_database_environment
-from DB_IO import list_columns, list_tables
+from fmes.database import validate_database_environment
+from fmes.db_io import list_columns, list_tables
 
 
 class DBIOIntegrationTests(unittest.TestCase):

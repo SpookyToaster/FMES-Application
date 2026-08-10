@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from config import Columns, Paths
+from .config import Columns, Paths
 
 
 DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH = str(Paths.ALLOY_COMPATIBILITY_CSV)

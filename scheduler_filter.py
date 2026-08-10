@@ -17,7 +17,7 @@ for diagnostic reporting.
 
 import pandas as pd
 
-from .config import Columns
+from config import Columns
 
 
 filtered_job_counts = {

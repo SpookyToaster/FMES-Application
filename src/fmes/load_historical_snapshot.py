@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from Database import connect, validate_database_environment
+from .database import connect, validate_database_environment
 
 
 REQUIRED_COLUMNS = [

@@ -9,7 +9,7 @@
 
 Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports formatted schedule workbooks.
 
-The program now uses a modular layout instead of a single monolithic script. [Main.py](Main.py) is the operational entrypoint, while [Scheduler.py](Scheduler.py) provides orchestration logic and the core work lives in dedicated modules for input, filtering, schedule building, and export.
+The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.py) is the operational entrypoint (also used by PyInstaller), [src/fmes/main.py](src/fmes/main.py) provides the CLI, [src/fmes/scheduler.py](src/fmes/scheduler.py) provides architectural logic, and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
 ---
 
@@ -49,22 +49,23 @@ The program now uses a modular layout instead of a single monolithic script. [Ma
 
 ### Orchestration
 
-- [Main.py](Main.py) is the canonical executable entrypoint for DB/Excel input through export.
-- [Scheduler.py](Scheduler.py) coordinates the schedule-building pipeline as a library module.
+- [run_scheduler.py](run_scheduler.py) is the canonical executable entrypoint (`python run_scheduler.py --source sql`).
+- [src/fmes/main.py](src/fmes/main.py) provides the CLI, logging setup, and export calls.
+- [src/fmes/scheduler.py](src/fmes/scheduler.py) coordinates the schedule-building pipeline as a library module.
 - It loads input, filters jobs, builds schedule rows, assigns days, groups by day, prints summaries, and exports the final workbook.
 
 ### Module Boundaries
 
-- [scheduler_io.py](scheduler_io.py) reads the Open Order Report workbook.
-- [scheduler_filter.py](scheduler_filter.py) filters rows down to jobs eligible for molding.
-- [scheduler_build.py](scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
-- [scheduler_export.py](scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
+- [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) reads the Open Order Report workbook.
+- [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py) filters rows down to jobs eligible for molding.
+- [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
+- [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
 
 ### Database & Reporting Modules
 
-- [Database.py](Database.py) validates DB environment and opens SQL Server connections.
-- [DB_IO.py](DB_IO.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_main_dashboard_rows`, `get_main_dashboard_scheduler_rows`).
-- [load_historical_snapshot.py](load_historical_snapshot.py) loads ERP snapshot CSV data into SQL Server history tables.
+- [src/fmes/database.py](src/fmes/database.py) validates DB environment and opens SQL Server connections.
+- [src/fmes/db_io.py](src/fmes/db_io.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_main_dashboard_rows`, `get_main_dashboard_scheduler_rows`).
+- [src/fmes/load_historical_snapshot.py](src/fmes/load_historical_snapshot.py) loads ERP snapshot CSV data into SQL Server history tables.
 - [Production_Report_Queries.sql](Production_Report_Queries.sql) contains production-ready SQL for Orders and Main dashboard column sets.
 
 ### Tests
@@ -209,7 +210,7 @@ Use [check_db_env.py](check_db_env.py) before running DB-dependent tasks.
 Run the test suite from the project folder:
 
 ```bash
-.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+.venv\Scripts\python.exe -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
 Current verification snapshot: 24 tests passing.

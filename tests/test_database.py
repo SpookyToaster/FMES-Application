@@ -3,9 +3,9 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from Database import build_connection_string, validate_database_environment
+from fmes.database import build_connection_string, validate_database_environment
 
 
 class DatabaseConfigTests(unittest.TestCase):

@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import Scheduler
-from config import Columns
+from fmes import scheduler
+from fmes.config import Columns
 
 
 class SchedulerIntegrationTests(unittest.TestCase):
@@ -42,17 +42,17 @@ class SchedulerIntegrationTests(unittest.TestCase):
             }
         }
 
-        with patch("Scheduler.Read_File", return_value=input_file), \
-               patch("Scheduler.Sync_Open_Order_Report_With_SQL", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
-             patch("Scheduler.Mold_Scheduler", return_value=input_file.iloc[[0]]), \
-             patch("Scheduler.Build_Schedule_Rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
-             patch("Scheduler.Assign_days", side_effect=lambda df: df.assign(**{"Schedule Day": 1})), \
-             patch("Scheduler.Build_Daily_Schedules", return_value={1: pd.DataFrame()}), \
-             patch("Scheduler.Build_Schedule_Dates", return_value={1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}), \
-             patch("Scheduler.Build_Daily_Export_Blocks", return_value=export_blocks), \
-             patch("Scheduler.Print_Export_Blocks"), \
-             patch("Scheduler.print_bucket"):
-            result = Scheduler.Schedule_Molds()
+        with patch("fmes.scheduler.read_file", return_value=input_file), \
+               patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
+             patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
+             patch("fmes.scheduler.build_schedule_rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
+             patch("fmes.scheduler.assign_days", side_effect=lambda df: df.assign(**{"Schedule Day": 1})), \
+             patch("fmes.scheduler.build_daily_schedules", return_value={1: pd.DataFrame()}), \
+             patch("fmes.scheduler.build_schedule_dates", return_value={1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}), \
+             patch("fmes.scheduler.build_daily_export_blocks", return_value=export_blocks), \
+             patch("fmes.scheduler.print_export_blocks"), \
+             patch("fmes.scheduler.print_bucket"):
+            result = scheduler.schedule_molds()
 
         self.assertEqual(result, export_blocks)
 

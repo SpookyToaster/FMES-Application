@@ -4,10 +4,10 @@ import unittest
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config import Columns
-from melt_planning import Build_Melt_Schedule
+from fmes.config import Columns
+from fmes.melt_planning import build_melt_schedule
 
 
 class MeltPlanningTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class MeltPlanningTests(unittest.TestCase):
             }
         ])
 
-        melt_schedule = Build_Melt_Schedule(schedule_df)
+        melt_schedule = build_melt_schedule(schedule_df)
         summary = melt_schedule[1]["heat_summary"]
 
         self.assertEqual(melt_schedule[1]["planned_heat_count"], 1)
@@ -64,7 +64,7 @@ class MeltPlanningTests(unittest.TestCase):
             },
         ])
 
-        melt_schedule = Build_Melt_Schedule(schedule_df)
+        melt_schedule = build_melt_schedule(schedule_df)
         planned_rows = melt_schedule[1]["rows"]
 
         self.assertEqual(planned_rows["Heat #"].tolist(), [1, 1])
@@ -88,7 +88,7 @@ class MeltPlanningTests(unittest.TestCase):
                 }
             )
 
-        melt_schedule = Build_Melt_Schedule(pd.DataFrame(rows))
+        melt_schedule = build_melt_schedule(pd.DataFrame(rows))
         summary = melt_schedule[1]["heat_summary"]
         overflow_rows = summary[summary["Heat Status"] == "Overflow"]
 

@@ -2,8 +2,8 @@
 
 
 a = Analysis(
-    ['Scheduler.py'],
-    pathex=[],
+    ['run_scheduler.py'],
+    pathex=['src'],
     binaries=[],
     datas=[],
     hiddenimports=[],

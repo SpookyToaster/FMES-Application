@@ -4,10 +4,10 @@ import unittest
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config import Columns
-from scheduler_filter import Mold_Scheduler, filtered_job_counts
+from fmes.config import Columns
+from fmes.scheduler_filter import mold_scheduler, filtered_job_counts
 
 
 class SchedulerFilterTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class SchedulerFilterTests(unittest.TestCase):
             {Columns.COL_JOB_NUMBER: "2000", Columns.COL_HOLD: "NO", Columns.COL_JOB_TYPE: "", Columns.COL_SCHEDULED: "NO", Columns.COL_CAST_TYPE: "L", Columns.COL_MOLDS_NEEDED: 2},
         ])
 
-        result = Mold_Scheduler(frame)
+        result = mold_scheduler(frame)
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0][Columns.COL_JOB_NUMBER], "1003")

@@ -4,9 +4,9 @@ import unittest
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from load_historical_snapshot import parse_run_date, validate_columns
+from fmes.load_historical_snapshot import parse_run_date, validate_columns
 
 
 class HistoricalLoaderTests(unittest.TestCase):

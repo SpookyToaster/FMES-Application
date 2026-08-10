@@ -1,7 +1,7 @@
 import os
 import sys
 
-from Database import validate_database_environment
+from .database import validate_database_environment
 
 
 def main():

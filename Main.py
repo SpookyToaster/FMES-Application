@@ -9,38 +9,17 @@ Main.py provides one command that runs the full end-to-end flow:
 """
 
 import argparse
-import logging
 import os
-from datetime import datetime
 
-from .config import Paths
-from .database import validate_database_environment
-from .scheduler import schedule_molds
-from .scheduler_export import export_heat_summary, export_mold_schedule
+from config import Paths
+from Database import validate_database_environment
+from Scheduler import schedule_molds
+from scheduler_export import export_heat_summary, export_mold_schedule
 
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_MOLD_OUTPUT = str(Paths.MOLD_SCHEDULE_OUTPUT)
 
 DEFAULT_HEAT_OUTPUT = str(Paths.HEAT_SUMMARY_OUTPUT)
-
-
-def setup_logging():
-    """Configure console output plus a monthly log file under the Schedule root."""
-    handlers = [logging.StreamHandler()]
-    try:
-        Paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log_path = Paths.LOG_DIR / f"fmes_{datetime.now():%Y-%m}.log"
-        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
-    except OSError:
-        pass  # Console-only logging when the shared folder is unavailable.
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=handlers,
-    )
 
 
 def parse_args():
@@ -92,7 +71,6 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
 
 def main():
     """CLI entrypoint."""
-    setup_logging()
     args = parse_args()
 
     if args.source:
@@ -103,10 +81,10 @@ def main():
         heat_output_file=args.heat_output_file,
     )
 
-    logger.info("Scheduler run complete.")
-    logger.info("Mold schedule: %s", result["mold_output_file"])
-    logger.info("Heat summary: %s", result["heat_output_file"])
-    logger.info("Day blocks exported: %s", result["day_block_count"])
+    print("Scheduler run complete.")
+    print(f"Mold schedule: {result['mold_output_file']}")
+    print(f"Heat summary: {result['heat_output_file']}")
+    print(f"Day blocks exported: {result['day_block_count']}")
 
 
 if __name__ == "__main__":

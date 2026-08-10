@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import Paths
+from .config import Paths
 
 
 REQUIRED_SQL_TEXT_COLUMNS = [

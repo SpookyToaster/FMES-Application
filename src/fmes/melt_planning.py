@@ -2,13 +2,13 @@
 
 import pandas as pd
 
-from alloy_compatibility import (
+from .alloy_compatibility import (
     ALLOY_COMPATIBILITY_GROUP_COLUMN,
     ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN,
     ALLOY_COMPATIBILITY_SPECIFIC_COLUMN,
     can_alloy_share_heat_with,
 )
-from config import Columns
+from .config import Columns
 
 
 MAX_PLANNED_HEATS_PER_DAY = 5
@@ -45,7 +45,7 @@ def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
     }
 
 
-def Build_Melt_Schedule(
+def build_melt_schedule(
     schedule_df,
     max_planned_heats_per_day=MAX_PLANNED_HEATS_PER_DAY,
     reserved_heat_slot_count=RESERVED_HEAT_SLOT_COUNT,

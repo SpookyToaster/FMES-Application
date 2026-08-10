@@ -9,17 +9,16 @@ Orchestrates the full scheduling pipeline:
   5. Attach calendar dates (skipping weekends) and heat numbers.
   6. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
 
-Import schedule_molds() from fmes.main or tests.
+Import Schedule_Molds() from Main.py or tests.
 """
 
 from datetime import datetime, timedelta
-import logging
 import os
 
 import pandas as pd
 
-from .config import Columns
-from .scheduler_build import (
+from config import Columns
+from scheduler_build import (
     assign_days,
     build_daily_schedules,
     build_schedule_dates,
@@ -27,16 +26,13 @@ from .scheduler_build import (
     print_bucket,
 )
 
-from .scheduler_export import (
+from scheduler_export import (
     build_daily_export_blocks,
     print_export_blocks,
 )
 
-from .scheduler_filter import mold_scheduler
-from .scheduler_io import read_file, sync_open_order_report_with_sql
-
-
-logger = logging.getLogger(__name__)
+from scheduler_filter import mold_scheduler
+from scheduler_io import read_file, sync_open_order_report_with_sql
 
 
 def schedule_molds():
@@ -55,13 +51,13 @@ def schedule_molds():
 
         if schedule_source == "sql":
             sync_result = sync_open_order_report_with_sql()
-            logger.info(
-                "Synchronized Open Order Report from SQL (%s rows).",
-                sync_result["row_count"],
+            print(
+                "Synchronized Open Order Report from SQL "
+                f"({sync_result['row_count']} rows)."
             )
-            logger.info("Backup: %s", sync_result["backup_path"])
-            logger.info("Historical OOR: %s", sync_result["historical_oor_path"])
-            logger.info("DB Snapshot: %s", sync_result["db_snapshot_path"])
+            print(f"Backup: {sync_result['backup_path']}")
+            print(f"Historical OOR: {sync_result['historical_oor_path']}")
+            print(f"DB Snapshot: {sync_result['db_snapshot_path']}")
 
             input_file = read_file(source="sql")
         elif schedule_source == "excel":
@@ -91,12 +87,9 @@ def schedule_molds():
 
         schedule_data_frame = assign_days(schedule_data_frame)
 
-        logger.info(
-            "Day Totals\n%s",
-            schedule_data_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
-        )
-        logger.debug(
-            "Assigned extensions\n%s",
+        print("\nDay Totals")
+        print(schedule_data_frame.groupby("Schedule Day")["Molds for EXT"].sum())
+        print(
             schedule_data_frame[
                 [
                     Columns.COL_JOB_NUMBER,
@@ -105,7 +98,7 @@ def schedule_molds():
                     "Molds for EXT",
                     "Schedule Day",
                 ]
-            ],
+            ]
         )
 
         print_bucket(schedule_data_frame)

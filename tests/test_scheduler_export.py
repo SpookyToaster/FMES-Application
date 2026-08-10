@@ -8,10 +8,10 @@ from unittest.mock import patch
 from openpyxl import load_workbook
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config import Columns
-from scheduler_export import Build_Daily_Export_Blocks, Build_Excel_Rows, Build_Heat_Daily_Totals_Rows, Build_Heat_Summary_Rows, Export_Heat_Summary, Export_Mold_Schedule
+from fmes.config import Columns
+from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, build_heat_daily_totals_rows, build_heat_summary_rows, export_heat_summary, export_mold_schedule
 
 
 class SchedulerExportTests(unittest.TestCase):
@@ -36,8 +36,8 @@ class SchedulerExportTests(unittest.TestCase):
         daily_schedules = {1: frame}
         day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
 
-        blocks = Build_Daily_Export_Blocks(daily_schedules, day_dates)
-        excel_rows = Build_Excel_Rows(blocks)
+        blocks = build_daily_export_blocks(daily_schedules, day_dates)
+        excel_rows = build_excel_rows(blocks)
 
         self.assertEqual(blocks[1]["weight_total"], 25)
         self.assertEqual(blocks[1]["mold_total"], 2)
@@ -75,7 +75,7 @@ class SchedulerExportTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_file = Path(temp_dir) / "mold_schedule.xlsx"
-            Export_Mold_Schedule(export_blocks, str(output_file))
+            export_mold_schedule(export_blocks, str(output_file))
             self.assertTrue(output_file.exists())
 
             wb = load_workbook(output_file)
@@ -99,9 +99,9 @@ class SchedulerExportTests(unittest.TestCase):
             }
         }
 
-        with patch("scheduler_export.Workbook.save", side_effect=PermissionError("locked")):
+        with patch("fmes.scheduler_export.Workbook.save", side_effect=PermissionError("locked")):
             with self.assertRaises(RuntimeError) as context:
-                Export_Mold_Schedule(export_blocks, "locked.xlsx")
+                export_mold_schedule(export_blocks, "locked.xlsx")
 
         self.assertIn("Failed while exporting mold schedule", str(context.exception))
 
@@ -140,7 +140,7 @@ class SchedulerExportTests(unittest.TestCase):
             }
         }
 
-        summary = Build_Heat_Summary_Rows(export_blocks)
+        summary = build_heat_summary_rows(export_blocks)
         self.assertEqual(len(summary), 2)
         self.assertEqual(summary[0]["Heat #"], 1)
         self.assertEqual(summary[0]["Alloy"], "LEW15")
@@ -179,7 +179,7 @@ class SchedulerExportTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_file = Path(temp_dir) / "heat_summary.xlsx"
-            Export_Heat_Summary(export_blocks, str(output_file))
+            export_heat_summary(export_blocks, str(output_file))
             self.assertTrue(output_file.exists())
 
             wb = load_workbook(output_file)
@@ -217,7 +217,7 @@ class SchedulerExportTests(unittest.TestCase):
             },
         ]
 
-        daily_rows = Build_Heat_Daily_Totals_Rows(summary_rows)
+        daily_rows = build_heat_daily_totals_rows(summary_rows)
         self.assertEqual(len(daily_rows), 1)
         self.assertEqual(daily_rows[0]["Total Heats"], 2)
         self.assertEqual(daily_rows[0]["Total Weight (lbs)"], 1500.0)
@@ -234,9 +234,9 @@ class SchedulerExportTests(unittest.TestCase):
             }
         }
 
-        with patch("scheduler_export.Workbook.save", side_effect=PermissionError("locked")):
+        with patch("fmes.scheduler_export.Workbook.save", side_effect=PermissionError("locked")):
             with self.assertRaises(RuntimeError) as context:
-                Export_Heat_Summary(export_blocks, "locked_heat.xlsx")
+                export_heat_summary(export_blocks, "locked_heat.xlsx")
 
         self.assertIn("Failed while exporting heat summary", str(context.exception))
 
