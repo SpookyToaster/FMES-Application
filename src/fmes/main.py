@@ -27,6 +27,11 @@ DEFAULT_MOLD_OUTPUT = str(Paths.MOLD_SCHEDULE_OUTPUT)
 DEFAULT_HEAT_OUTPUT = str(Paths.HEAT_SUMMARY_OUTPUT)
 
 
+def _resolve_schedule_source():
+    """Return the configured scheduler input source."""
+    return os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
+
+
 def setup_logging():
     """Console shows plain readable messages; the monthly file keeps full detail."""
     console_handler = logging.StreamHandler()
@@ -76,6 +81,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def parse_heat_args():
+    """Parse CLI args for the heat-only scheduler entrypoint."""
+    parser = argparse.ArgumentParser(
+        description="Run FMES heat scheduling only from DB/Excel source through heat export."
+    )
+    parser.add_argument(
+        "--source",
+        choices=["sql", "excel"],
+        default=None,
+        help="Input source override (defaults to SCHEDULER_INPUT_SOURCE or sql).",
+    )
+    parser.add_argument(
+        "--heat-output-file",
+        default=DEFAULT_HEAT_OUTPUT,
+        help="Output path for Heat Summary workbook.",
+    )
+    parser.add_argument(
+        "--no-pause",
+        action="store_true",
+        help="Exit immediately instead of waiting for Enter (for automation).",
+    )
+    return parser.parse_args()
+
+
 def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     """
     Execute full scheduler run and export workbooks.
@@ -83,7 +112,7 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     Returns:
         dict with output file paths and number of day blocks exported.
     """
-    schedule_source = os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
+    schedule_source = _resolve_schedule_source()
 
     logger.info("=" * 60)
     logger.info("FMES Scheduler starting (source: %s)", schedule_source.upper())
@@ -107,7 +136,7 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     logger.info("[4/4] Writing Heat Summary workbook...")
     export_heat_summary(
         schedule_result["melt_schedule"],
-        schedule_result["day_dates"],
+        schedule_result["pour_day_dates"],
         heat_output_file,
     )
     logger.info("      Saved: %s", heat_output_file)
@@ -116,6 +145,43 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
         "mold_output_file": output_file,
         "heat_output_file": heat_output_file,
         "day_block_count": len(export_blocks),
+    }
+
+
+def run_heat_schedule(heat_output_file=DEFAULT_HEAT_OUTPUT):
+    """
+    Execute just the heat-planning workflow and export the heat workbook.
+
+    Returns:
+        dict with heat output path and number of production day blocks planned.
+    """
+    schedule_source = _resolve_schedule_source()
+
+    logger.info("=" * 60)
+    logger.info("FMES Heat Scheduler starting (source: %s)", schedule_source.upper())
+    logger.info("=" * 60)
+
+    if schedule_source == "sql":
+        logger.info("[1/3] Checking database configuration...")
+        validate_database_environment()
+        logger.info("      Database configuration OK.")
+    else:
+        logger.info("[1/3] Skipping database check (Excel source).")
+
+    logger.info("[2/3] Building heat schedule...")
+    schedule_result = schedule_molds()
+
+    logger.info("[3/3] Writing Heat Summary workbook...")
+    export_heat_summary(
+        schedule_result["melt_schedule"],
+        schedule_result["pour_day_dates"],
+        heat_output_file,
+    )
+    logger.info("      Saved: %s", heat_output_file)
+
+    return {
+        "heat_output_file": heat_output_file,
+        "day_block_count": len(schedule_result["export_blocks"]),
     }
 
 
@@ -154,6 +220,32 @@ def main():
         logger.info("=" * 60)
     except Exception:
         logger.exception("Scheduler run FAILED.")
+        logger.error("See the log file under %s for details.", Paths.LOG_DIR)
+        exit_code = 1
+
+    _pause_before_exit(args.no_pause)
+    return exit_code
+
+
+def heat_main():
+    """CLI entrypoint for heat-only scheduling."""
+    setup_logging()
+    args = parse_heat_args()
+
+    if args.source:
+        os.environ["SCHEDULER_INPUT_SOURCE"] = args.source
+
+    exit_code = 0
+    try:
+        result = run_heat_schedule(heat_output_file=args.heat_output_file)
+
+        logger.info("=" * 60)
+        logger.info("Heat scheduler run complete.")
+        logger.info("Heat summary: %s", result["heat_output_file"])
+        logger.info("Production days scheduled: %s", result["day_block_count"])
+        logger.info("=" * 60)
+    except Exception:
+        logger.exception("Heat scheduler run FAILED.")
         logger.error("See the log file under %s for details.", Paths.LOG_DIR)
         exit_code = 1
 

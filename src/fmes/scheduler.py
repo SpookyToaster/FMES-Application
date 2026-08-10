@@ -6,9 +6,9 @@ Orchestrates the full scheduling pipeline:
     2. Filter jobs eligible for mold scheduling.
     3. Expand jobs into extension-sized work chunks.
     4. Prioritize rows for review and scheduling by due date.
-    5. Assign each chunk to a production day respecting daily mold capacity.
-    6. Build a per-day melt plan with heat assignments.
-    7. Back-fill the melt-plan rows into the mold schedule export shape.
+    5. Build a heat-first pour plan.
+    6. Back-fill the mold schedule from planned heats.
+    7. Map mold days to dates, then map pour days to the next production date.
     8. Return export blocks plus the planner data needed for heat exports.
 
 Import schedule_molds() from fmes.main or tests.
@@ -22,12 +22,12 @@ import pandas as pd
 
 from .config import Columns
 from .scheduler_build import (
-    assign_days,
+    assign_mold_days_from_heat_plan,
     build_schedule_dates,
     build_schedule_rows,
     print_bucket,
 )
-from .melt_planning import build_melt_schedule, prioritize_schedule_rows
+from .melt_planning import build_melt_schedule, prioritize_schedule_rows, shift_melt_schedule_days
 
 from .scheduler_export import (
     build_daily_export_blocks,
@@ -46,7 +46,7 @@ def schedule_molds():
     Run the complete mold scheduling pipeline and return export blocks.
 
     Returns:
-        dict: Contains 'export_blocks', 'melt_schedule', and 'day_dates'.
+        dict: Contains mold export blocks plus mold/pour date maps.
 
     Raises:
         RuntimeError: If any pipeline stage fails.
@@ -90,46 +90,60 @@ def schedule_molds():
             prioritize_schedule_rows(schedule_data_frame)
         )
 
-        logger.info("      Assigning production days...")
-        schedule_data_frame = assign_days(schedule_data_frame)
+        logger.info("      Building heat-first pour plan...")
+        melt_schedule = build_melt_schedule(schedule_data_frame)
+
+        planned_heat_rows = pd.concat(
+            [day_plan["rows"] for day_plan in melt_schedule.values()],
+            ignore_index=True,
+        ) if melt_schedule else pd.DataFrame()
+
+        logger.info("      Back-filling mold schedule from planned heats...")
+        mold_schedule_frame, day_offset = assign_mold_days_from_heat_plan(planned_heat_rows)
+        melt_schedule = shift_melt_schedule_days(melt_schedule, day_offset)
 
         logger.info(
             "Day Totals\n%s",
-            schedule_data_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
+            mold_schedule_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
         )
         logger.debug(
-            "Assigned extensions\n%s",
-            schedule_data_frame[
+            "Back-filled mold rows\n%s",
+            mold_schedule_frame[
                 [
                     Columns.COL_JOB_NUMBER,
                     "EXT",
                     Columns.COL_ALLOY,
                     "Molds for EXT",
                     "Schedule Day",
+                    "Pour Schedule Day",
                 ]
             ],
         )
 
-        print_bucket(schedule_data_frame)
+        print_bucket(mold_schedule_frame)
 
-        logger.info("      Building daily melt plan and assigning heat numbers...")
-        melt_schedule = build_melt_schedule(schedule_data_frame)
-        daily_schedules = {
-            day: day_plan["rows"].copy()
-            for day, day_plan in melt_schedule.items()
-        }
-        day_dates = build_schedule_dates(
-            daily_schedules,
+        mold_day_dates = build_schedule_dates(
+            {day: pd.DataFrame() for day in sorted(mold_schedule_frame["Schedule Day"].unique())},
             datetime.today() + timedelta(days=1),
         )
-        export_blocks = build_daily_export_blocks(daily_schedules, day_dates)
+        pour_day_dates = build_schedule_dates(
+            {day: pd.DataFrame() for day in sorted(melt_schedule.keys())},
+            datetime.today() + timedelta(days=2),
+        )
+
+        daily_schedules = {
+            day: mold_schedule_frame[mold_schedule_frame["Schedule Day"] == day].copy()
+            for day in sorted(mold_schedule_frame["Schedule Day"].unique())
+        }
+        export_blocks = build_daily_export_blocks(daily_schedules, mold_day_dates)
         print_export_blocks(export_blocks)
 
         logger.info("      Schedule spans %s production day(s).", len(export_blocks))
         return {
             "export_blocks": export_blocks,
             "melt_schedule": melt_schedule,
-            "day_dates": day_dates,
+            "mold_day_dates": mold_day_dates,
+            "pour_day_dates": pour_day_dates,
         }
     except Exception as exc:
         raise RuntimeError("Schedule_Molds failed during orchestration") from exc

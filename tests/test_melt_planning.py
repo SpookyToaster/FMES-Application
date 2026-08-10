@@ -177,7 +177,7 @@ class MeltPlanningTests(unittest.TestCase):
 
         self.assertEqual(planned_rows["Heat #"].tolist(), [1, 2])
 
-    def test_build_melt_schedule_flags_overflow_after_five_planned_heats(self):
+    def test_build_melt_schedule_spills_sixth_heat_to_next_pour_day(self):
         rows = []
         for index in range(6):
             rows.append(
@@ -197,13 +197,11 @@ class MeltPlanningTests(unittest.TestCase):
             )
 
         melt_schedule = build_melt_schedule(pd.DataFrame(rows), reference_date="2026-08-10")
-        summary = melt_schedule[1]["heat_summary"]
-        overflow_rows = summary[summary["Heat Status"] == "Overflow"]
 
         self.assertEqual(melt_schedule[1]["planned_heat_count"], 5)
-        self.assertEqual(melt_schedule[1]["overflow_heat_count"], 1)
-        self.assertEqual(len(overflow_rows), 1)
-        self.assertEqual(int(overflow_rows.iloc[0]["Heat #"]), 6)
+        self.assertEqual(melt_schedule[1]["overflow_heat_count"], 0)
+        self.assertEqual(melt_schedule[2]["planned_heat_count"], 1)
+        self.assertEqual(melt_schedule[2]["rows"].iloc[0]["Heat #"], 1)
 
 
 if __name__ == "__main__":

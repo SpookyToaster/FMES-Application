@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.config import Columns
-from fmes.scheduler_build import assign_days, build_daily_schedules, build_schedule_dates, build_schedule_rows, expand_job, get_extensions
+from fmes.scheduler_build import assign_days, assign_mold_days_from_heat_plan, build_daily_schedules, build_schedule_dates, build_schedule_rows, expand_job, get_extensions
 
 
 class SchedulerBuildTests(unittest.TestCase):
@@ -92,6 +92,32 @@ class SchedulerBuildTests(unittest.TestCase):
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
         self.assertEqual(assigned["EXT"].tolist(), ["A", "A"])
         self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 4])
+
+    def test_assign_mold_days_from_heat_plan_backfills_before_pour_day(self):
+        planned_rows = pd.DataFrame([
+            {
+                "Pour Schedule Day": 1,
+                "Heat #": 1,
+                Columns.COL_JOB_NUMBER: "6101",
+                Columns.COL_POUR_WEIGHT: 100,
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_ALLOY: "A",
+                Columns.COL_DUE_DATE: "2026-08-04",
+                "Planning Priority Rank": 0,
+                "Due Date Sort": pd.Timestamp("2026-08-04"),
+                "Extension_Seq": 0,
+                "EXT": "A",
+                "Molds for EXT": 8,
+                "Total Weight per EXT": 800,
+            }
+        ])
+
+        assigned, day_offset = assign_mold_days_from_heat_plan(planned_rows)
+        assigned = assigned.sort_values(by=["Schedule Day"]).reset_index(drop=True)
+
+        self.assertEqual(day_offset, 2)
+        self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
+        self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [2, 6])
 
     def test_partial_completion_and_multi_day_extensions_work_together(self):
         job = pd.Series({

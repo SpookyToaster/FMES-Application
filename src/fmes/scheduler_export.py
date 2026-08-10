@@ -7,11 +7,20 @@ workbooks:
     Heat Summary.xlsx   – melt-plan summary, daily totals, and planner worksheet.
 """
 
+from pathlib import Path
+
 from openpyxl import Workbook
 from openpyxl.styles import Border, Font, Side
 import pandas as pd
 
 from .config import Columns
+
+
+def _ensure_output_parent(output_file):
+    """Create the destination parent directory when it does not already exist."""
+    output_path = Path(output_file)
+    if output_path.parent and not output_path.parent.exists():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _normalize_due_date(value):
@@ -165,6 +174,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
         output_file:   Destination path for the workbook.
     """
     try:
+        _ensure_output_parent(output_file)
         wb = Workbook()
         ws = wb.active
         ws.title = "Mold Schedule"
@@ -272,19 +282,46 @@ def build_heat_summary_rows(export_blocks):
 
     for day in sorted(melt_schedule.keys()):
         heat_summary = melt_schedule[day].get("heat_summary", pd.DataFrame()).copy()
+        planned_rows = melt_schedule[day].get("rows", pd.DataFrame()).copy()
         if heat_summary.empty:
             continue
 
         block_date = day_dates[day]["date"]
         block_weekday = day_dates[day]["weekday"]
 
+        heat_breakout_map = {}
+        if not planned_rows.empty and "Heat #" in planned_rows.columns:
+            for heat_number, heat_df in planned_rows.groupby("Heat #", sort=True):
+                if pd.isna(heat_number) or heat_number == "":
+                    continue
+
+                detail_rows = []
+                for _, planned_row in heat_df.iterrows():
+                    job_number = str(planned_row.get(Columns.COL_JOB_NUMBER, "") or "").strip()
+                    ext = str(planned_row.get("EXT", "") or "").strip()
+                    due_date = _normalize_due_date(planned_row.get(Columns.COL_DUE_DATE, ""))
+                    due_date_text = due_date.strftime("%m/%d/%Y") if hasattr(due_date, "strftime") else ""
+                    molds_for_row = pd.to_numeric(
+                        planned_row.get("Molds for EXT", 0),
+                        errors="coerce",
+                    )
+                    molds_text = "" if pd.isna(molds_for_row) else str(int(molds_for_row))
+
+                    job_label = f"{job_number}-{ext}" if job_number and ext else job_number
+                    detail_rows.append(
+                        f"{job_label} | Due {due_date_text} | Molds {molds_text}"
+                    )
+
+                heat_breakout_map[heat_number] = "; ".join(detail_rows)
+
         for _, row in heat_summary.iterrows():
+            heat_number = row.get("Heat #", "")
             summary_rows.append(
                 {
                     "Schedule Date": block_date.date() if hasattr(block_date, "date") else block_date,
                     "Weekday": block_weekday,
                     "Heat Slot": row.get("Heat Slot", ""),
-                    "Heat #": row.get("Heat #", ""),
+                    "Heat #": heat_number,
                     "Heat Status": row.get("Heat Status", ""),
                     "Planning Priority": row.get("Planning Priority", ""),
                     "Review Window": row.get("Review Window", ""),
@@ -297,6 +334,7 @@ def build_heat_summary_rows(export_blocks):
                     "Rows in Heat": int(row.get("Rows in Heat", 0) or 0),
                     "Jobs": row.get("Jobs", ""),
                     "Extensions": row.get("Extensions", ""),
+                    "Job Breakout": heat_breakout_map.get(heat_number, ""),
                 }
             )
 
@@ -396,6 +434,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
         output_file:   Destination path for the workbook.
     """
     try:
+        _ensure_output_parent(output_file)
         wb = Workbook()
         ws = wb.active
         ws.title = "Heat Summary"
@@ -417,6 +456,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Rows in Heat",
             "Jobs",
             "Extensions",
+            "Job Breakout",
         ]
 
         bold = Font(bold=True)
@@ -453,6 +493,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 row["Rows in Heat"],
                 row["Jobs"],
                 row["Extensions"],
+                row["Job Breakout"],
             ]
 
             for col_num, value in enumerate(values, start=1):
@@ -484,6 +525,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "N": 12,
             "O": 24,
             "P": 28,
+            "Q": 60,
         }
 
         for col, width in widths.items():

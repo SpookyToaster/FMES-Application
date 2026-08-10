@@ -315,6 +315,98 @@ def assign_days(schedule_df):
         raise RuntimeError("Failed while assigning schedule days") from exc
 
 
+def assign_mold_days_from_heat_plan(planned_rows):
+    """
+    Back-fill molding days from an authoritative heat plan.
+
+    Pour days remain fixed. Mold capacity only determines how early molding must
+    begin to support those planned pours.
+
+    Returns:
+        tuple[pd.DataFrame, int]: allocated mold rows and the day offset applied
+        so the earliest mold day becomes 1.
+    """
+    try:
+        if planned_rows.empty:
+            return pd.DataFrame(), 0
+
+        day_usage = {}
+        job_usage = {}
+        allocated_rows = []
+
+        planned_rows = planned_rows.copy().sort_values(
+            by=[
+                "Pour Schedule Day",
+                "Planning Priority Rank",
+                "Due Date Sort",
+                "Heat #",
+                Columns.COL_JOB_NUMBER,
+                "Extension_Seq",
+            ],
+            ascending=[True, True, True, True, True, True],
+            na_position="last",
+        )
+
+        for _, row in planned_rows.iterrows():
+            molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
+            if molds_remaining <= 0:
+                continue
+
+            bucket = "F" if is_f_job(row) else "L"
+            job_num = row[Columns.COL_JOB_NUMBER]
+            per_job_daily_limit = get_daily_mold_limit(row)
+            day = _safe_int(row.get("Pour Schedule Day", 1), default=1) - 1
+
+            while molds_remaining > 0:
+                if day not in day_usage:
+                    day_usage[day] = {"L": 0, "F": 0}
+                if day not in job_usage:
+                    job_usage[day] = {}
+                if job_num not in job_usage[day]:
+                    job_usage[day][job_num] = {"L": 0, "F": 0}
+
+                capacity = (
+                    DailyMoldLimits.MAX_F_MOLDS_PER_DAY
+                    if bucket == "F"
+                    else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
+                )
+                available_day_capacity = capacity - day_usage[day][bucket]
+                available_job_capacity = per_job_daily_limit - job_usage[day][job_num][bucket]
+                molds_for_day = min(
+                    molds_remaining,
+                    available_day_capacity,
+                    available_job_capacity,
+                )
+
+                if molds_for_day > 0:
+                    row_for_day = row.copy()
+                    row_for_day["Molds for EXT"] = molds_for_day
+                    pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+                    row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
+                    row_for_day["Schedule Day"] = day
+                    allocated_rows.append(row_for_day)
+
+                    day_usage[day][bucket] += molds_for_day
+                    job_usage[day][job_num][bucket] += molds_for_day
+                    molds_remaining -= molds_for_day
+
+                if molds_remaining > 0:
+                    day -= 1
+
+        mold_schedule = pd.DataFrame(allocated_rows)
+        if mold_schedule.empty:
+            return mold_schedule, 0
+
+        min_day = int(mold_schedule["Schedule Day"].min())
+        day_offset = 1 - min_day if min_day < 1 else 0
+        if day_offset:
+            mold_schedule["Schedule Day"] = mold_schedule["Schedule Day"] + day_offset
+
+        return mold_schedule, day_offset
+    except Exception as exc:
+        raise RuntimeError("Failed while back-filling mold days from heat plan") from exc
+
+
 def print_bucket(Schedule_Data_Frame):
     """Print a per-day summary of L and F mold counts versus daily limits."""
     for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):

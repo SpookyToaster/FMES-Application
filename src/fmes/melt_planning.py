@@ -142,44 +142,62 @@ def build_melt_schedule(
     reference_date=None,
 ):
     """
-    Build an initial melt schedule from day-assigned open-order extensions.
+    Build an initial heat-first melt schedule from open-order extensions.
 
-    Returns a dict keyed by schedule day with both row-level heat assignments and
-    a summarized melt plan that reserves the final slot for exceptions.
+    Returns a dict keyed by pour schedule day with both row-level heat assignments
+    and a summarized melt plan that reserves the final slot for exceptions.
     """
     if schedule_df.empty:
         return {}
 
-    melt_schedule = {}
     reference_date = _normalize_reference_date(reference_date)
+    planned_rows = prioritize_schedule_rows(schedule_df, reference_date=reference_date)
+    planned_rows = assign_heat_numbers(
+        planned_rows,
+        heat_weight_limit_lbs=heat_weight_limit_lbs,
+        heat_mold_limit=heat_mold_limit,
+    )
 
-    for day in sorted(schedule_df["Schedule Day"].dropna().unique()):
-        day_df = schedule_df[schedule_df["Schedule Day"] == day].copy()
-        day_df = prioritize_schedule_rows(day_df, reference_date=reference_date)
+    if planned_rows.empty:
+        return {}
 
-        planned_rows = assign_heat_numbers(
-            day_df,
-            heat_weight_limit_lbs=heat_weight_limit_lbs,
-            heat_mold_limit=heat_mold_limit,
+    planned_rows = planned_rows.rename(columns={"Heat #": "Global Heat #"}).copy()
+    heat_groups = list(planned_rows.groupby("Global Heat #", sort=True).groups.keys())
+    pour_day_by_global_heat = {}
+    heat_slot_by_global_heat = {}
+
+    for group_index, global_heat_number in enumerate(heat_groups, start=1):
+        pour_day_by_global_heat[global_heat_number] = ((group_index - 1) // max_planned_heats_per_day) + 1
+        heat_slot_by_global_heat[global_heat_number] = ((group_index - 1) % max_planned_heats_per_day) + 1
+
+    planned_rows["Pour Schedule Day"] = planned_rows["Global Heat #"].map(pour_day_by_global_heat)
+    planned_rows["Heat #"] = planned_rows["Global Heat #"].map(heat_slot_by_global_heat)
+    planned_rows["Heat Slot"] = planned_rows["Heat #"]
+
+    melt_schedule = {}
+    for day in sorted(planned_rows["Pour Schedule Day"].dropna().unique()):
+        day_rows = (
+            planned_rows[planned_rows["Pour Schedule Day"] == day]
+            .copy()
+            .reset_index(drop=True)
         )
 
         summary_rows = []
-        if not planned_rows.empty:
-            for heat_number, heat_df in planned_rows.groupby("Heat #", sort=True):
-                summary_rows.append(
-                    _summarize_heat_rows(
-                        day,
-                        int(heat_number),
-                        heat_df,
-                        max_planned_heats_per_day,
-                    )
+        for heat_number, heat_df in day_rows.groupby("Heat #", sort=True):
+            summary_rows.append(
+                _summarize_heat_rows(
+                    int(day),
+                    int(heat_number),
+                    heat_df,
+                    max_planned_heats_per_day,
                 )
+            )
 
         for slot_offset in range(reserved_heat_slot_count):
             reserved_slot = max_planned_heats_per_day + slot_offset + 1
             summary_rows.append(
                 {
-                    "Schedule Day": day,
+                    "Schedule Day": int(day),
                     "Heat #": "",
                     "Heat Slot": reserved_slot,
                     "Heat Status": "Reserved",
@@ -197,20 +215,11 @@ def build_melt_schedule(
                 }
             )
 
-        heat_summary = pd.DataFrame(summary_rows)
-        overflow_heat_count = max(
-            int(planned_rows["Heat #"].max()) - max_planned_heats_per_day,
-            0,
-        ) if not planned_rows.empty else 0
-
         melt_schedule[int(day)] = {
-            "rows": planned_rows,
-            "heat_summary": heat_summary,
-            "planned_heat_count": min(
-                int(planned_rows["Heat #"].max()) if not planned_rows.empty else 0,
-                max_planned_heats_per_day,
-            ),
-            "overflow_heat_count": overflow_heat_count,
+            "rows": day_rows,
+            "heat_summary": pd.DataFrame(summary_rows),
+            "planned_heat_count": int(day_rows["Heat #"].nunique()),
+            "overflow_heat_count": 0,
             "reserved_heat_slots": list(
                 range(
                     max_planned_heats_per_day + 1,
@@ -220,6 +229,31 @@ def build_melt_schedule(
         }
 
     return melt_schedule
+
+
+def shift_melt_schedule_days(melt_schedule, day_offset):
+    """Shift pour schedule day keys and row metadata by day_offset."""
+    if not melt_schedule or day_offset == 0:
+        return melt_schedule
+
+    shifted = {}
+    for day, plan in melt_schedule.items():
+        new_day = int(day) + int(day_offset)
+        shifted_rows = plan.get("rows", pd.DataFrame()).copy()
+        if not shifted_rows.empty and "Pour Schedule Day" in shifted_rows.columns:
+            shifted_rows["Pour Schedule Day"] = shifted_rows["Pour Schedule Day"] + int(day_offset)
+
+        shifted_summary = plan.get("heat_summary", pd.DataFrame()).copy()
+        if not shifted_summary.empty and "Schedule Day" in shifted_summary.columns:
+            shifted_summary["Schedule Day"] = shifted_summary["Schedule Day"] + int(day_offset)
+
+        shifted[new_day] = {
+            **plan,
+            "rows": shifted_rows,
+            "heat_summary": shifted_summary,
+        }
+
+    return shifted
 
 
 def _build_compatibility_map_from_frame(day_df):

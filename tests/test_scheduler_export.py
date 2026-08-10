@@ -88,6 +88,38 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(3, 13).value, "Heat #")
             self.assertEqual(ws.cell(4, 13).value, 1)
 
+    def test_export_mold_schedule_creates_missing_parent_directory(self):
+        export_blocks = {
+            1: {
+                "date": pd.Timestamp("2026-08-04"),
+                "weekday": "Tuesday",
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04 00:00:00",
+                        "Customer Name": "Customer",
+                        "Part Number": "P1",
+                        Columns.COL_JOB_NUMBER: "5001",
+                        "EXT": "",
+                        Columns.COL_ALLOY: "A",
+                        Columns.COL_CAST_TYPE: "L",
+                        "Quantity of Molds": 1,
+                        "Castings Per Mold": 1,
+                        "Quantity of Cores": 0,
+                        "Total Weight per EXT": 25,
+                        "Molds for EXT": 2,
+                        "Heat #": 1,
+                    }
+                ]),
+                "weight_total": 25,
+                "mold_total": 2,
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "nested" / "mold_schedule.xlsx"
+            export_mold_schedule(export_blocks, str(output_file))
+            self.assertTrue(output_file.exists())
+
     def test_export_mold_schedule_wraps_save_failures(self):
         export_blocks = {
             1: {
@@ -144,6 +176,22 @@ class SchedulerExportTests(unittest.TestCase):
         melt_schedule = {
             1: {
                 "heat_summary": heat_summary,
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        Columns.COL_JOB_NUMBER: "5001",
+                        "EXT": "A",
+                        "Molds for EXT": 2,
+                        "Heat #": 1,
+                    },
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-05",
+                        Columns.COL_JOB_NUMBER: "5001",
+                        "EXT": "B",
+                        "Molds for EXT": 2,
+                        "Heat #": 1,
+                    },
+                ]),
             }
         }
         day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
@@ -155,6 +203,10 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(summary[0]["Anchor Alloy"], "LEW15")
         self.assertEqual(summary[0]["Total Weight (lbs)"], 1200.0)
         self.assertEqual(summary[0]["Total Molds"], 4.0)
+        self.assertEqual(
+            summary[0]["Job Breakout"],
+            "5001-A | Due 08/04/2026 | Molds 2; 5001-B | Due 08/05/2026 | Molds 2",
+        )
         self.assertEqual(summary[1]["Heat Status"], "Reserved")
 
     def test_build_heat_planner_rows_keeps_reserved_slot_blank_for_manual_fill(self):
@@ -237,6 +289,22 @@ class SchedulerExportTests(unittest.TestCase):
                         "Extensions": "",
                     },
                 ]),
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        Columns.COL_JOB_NUMBER: "5001",
+                        "EXT": "A",
+                        "Molds for EXT": 2,
+                        "Heat #": 1,
+                    },
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        Columns.COL_JOB_NUMBER: "5002",
+                        "EXT": "B",
+                        "Molds for EXT": 1,
+                        "Heat #": 2,
+                    },
+                ]),
             }
         }
         day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
@@ -252,6 +320,11 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(1, 3).value, "Heat Slot")
             self.assertEqual(ws.cell(2, 3).value, 1)
             self.assertEqual(ws.cell(2, 8).value, "LEW15")
+            self.assertEqual(ws.cell(1, 17).value, "Job Breakout")
+            self.assertEqual(
+                ws.cell(2, 17).value,
+                "5001-A | Due 08/04/2026 | Molds 2",
+            )
 
             ws_daily = wb["Daily Heat Totals"]
             self.assertEqual(ws_daily.cell(1, 1).value, "Schedule Date")
@@ -265,6 +338,20 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_planner.cell(1, 16).value, "Manual Alloy")
             self.assertEqual(ws_planner.cell(4, 3).value, 6)
             self.assertEqual(ws_planner.cell(4, 16).value, None)
+
+    def test_export_heat_summary_creates_missing_parent_directory(self):
+        melt_schedule = {
+            1: {
+                "heat_summary": pd.DataFrame(),
+                "rows": pd.DataFrame(),
+            }
+        }
+        day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "nested" / "heat_summary.xlsx"
+            export_heat_summary(melt_schedule, day_dates, str(output_file))
+            self.assertTrue(output_file.exists())
 
     def test_build_heat_daily_totals_rows(self):
         summary_rows = [
