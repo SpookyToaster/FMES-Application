@@ -31,6 +31,7 @@ from .melt_planning import build_melt_schedule, prioritize_schedule_rows, shift_
 
 from .scheduler_export import (
     build_daily_export_blocks,
+    build_job_shipping_report_rows,
     print_export_blocks,
 )
 
@@ -140,6 +141,12 @@ def schedule_molds():
             mold_day_dates,
             pour_day_dates=pour_day_dates,
         )
+        job_shipping_rows = build_job_shipping_report_rows(
+            schedule_data_frame,
+            mold_schedule_frame,
+            mold_day_dates,
+            pour_day_dates,
+        )
         print_export_blocks(export_blocks)
 
         logger.info("      Schedule spans %s production day(s).", len(export_blocks))
@@ -148,6 +155,7 @@ def schedule_molds():
             "melt_schedule": melt_schedule,
             "mold_day_dates": mold_day_dates,
             "pour_day_dates": pour_day_dates,
+            "job_shipping_rows": job_shipping_rows,
         }
     except Exception as exc:
         raise RuntimeError("Schedule_Molds failed during orchestration") from exc

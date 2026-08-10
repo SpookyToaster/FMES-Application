@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.config import Columns
-from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, build_heat_daily_totals_rows, build_heat_planner_rows, build_heat_summary_rows, export_heat_summary, export_mold_schedule
+from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, build_heat_daily_totals_rows, build_heat_planner_rows, build_heat_summary_rows, build_job_shipping_report_rows, export_heat_summary, export_mold_schedule
 
 
 class SchedulerExportTests(unittest.TestCase):
@@ -73,9 +73,26 @@ class SchedulerExportTests(unittest.TestCase):
             }
         }
 
+        job_shipping_rows = [
+            {
+                "Job Number": "5001",
+                "Schedule Status": "Scheduled",
+                "Planned Molds": 2,
+                "Scheduled Molds": 2,
+                "Mold Day": 1,
+                "Mold Date": pd.Timestamp("2026-08-04").date(),
+                "Pour Day": 2,
+                "Pour Date": pd.Timestamp("2026-08-05").date(),
+                "Expected Ship Date": pd.Timestamp("2026-08-19").date(),
+                "Due Date": pd.Timestamp("2026-08-20").date(),
+                "Ship Buffer Days": 1,
+                "On-Time": "YES",
+            }
+        ]
+
         with tempfile.TemporaryDirectory() as temp_dir:
             output_file = Path(temp_dir) / "mold_schedule.xlsx"
-            export_mold_schedule(export_blocks, str(output_file))
+            export_mold_schedule(export_blocks, str(output_file), job_shipping_rows=job_shipping_rows)
             self.assertTrue(output_file.exists())
 
             wb = load_workbook(output_file)
@@ -87,6 +104,53 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(due_date_cell.number_format, "m/d/yyyy")
             self.assertEqual(ws.cell(3, 13).value, "Heat #")
             self.assertEqual(ws.cell(4, 13).value, 1)
+
+            ws_jobs = wb["Job Shipping Outlook"]
+            self.assertEqual(ws_jobs.cell(1, 2).value, "Schedule Status")
+            self.assertEqual(ws_jobs.cell(2, 1).value, "5001")
+            self.assertEqual(ws_jobs.cell(2, 12).value, "YES")
+
+    def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
+        schedule_data_frame = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "5001",
+                Columns.COL_DUE_DATE: "2026-08-20",
+                "Molds for EXT": 2,
+            },
+            {
+                Columns.COL_JOB_NUMBER: "5002",
+                Columns.COL_DUE_DATE: "2026-08-18",
+                "Molds for EXT": 1,
+            },
+        ])
+
+        mold_schedule_frame = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "5001",
+                "Molds for EXT": 2,
+                "Schedule Day": 1,
+                "Pour Schedule Day": 2,
+            }
+        ])
+
+        mold_day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+        pour_day_dates = {2: {"date": pd.Timestamp("2026-08-05"), "weekday": "Wednesday"}}
+
+        rows = build_job_shipping_report_rows(
+            schedule_data_frame,
+            mold_schedule_frame,
+            mold_day_dates,
+            pour_day_dates,
+        )
+
+        by_job = {row["Job Number"]: row for row in rows}
+        self.assertEqual(by_job["5001"]["Schedule Status"], "Scheduled")
+        self.assertEqual(by_job["5001"]["Expected Ship Date"].isoformat(), "2026-08-19")
+        self.assertEqual(by_job["5001"]["Ship Buffer Days"], 1)
+        self.assertEqual(by_job["5001"]["On-Time"], "YES")
+
+        self.assertEqual(by_job["5002"]["Schedule Status"], "Not Yet Scheduled")
+        self.assertEqual(by_job["5002"]["On-Time"], "NOT SCHEDULED")
 
     def test_export_mold_schedule_creates_missing_parent_directory(self):
         export_blocks = {

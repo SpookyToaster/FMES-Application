@@ -130,7 +130,11 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     export_blocks = schedule_result["export_blocks"]
 
     logger.info("[3/4] Writing Mold Schedule workbook...")
-    export_mold_schedule(export_blocks, output_file)
+    export_mold_schedule(
+        export_blocks,
+        output_file,
+        job_shipping_rows=schedule_result.get("job_shipping_rows", []),
+    )
     logger.info("      Saved: %s", output_file)
 
     logger.info("[4/4] Writing Heat Summary workbook...")

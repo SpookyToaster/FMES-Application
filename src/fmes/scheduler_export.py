@@ -12,6 +12,7 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
 from openpyxl.styles import Border, Font, Side
+from openpyxl.styles import PatternFill
 import pandas as pd
 
 from .config import Columns
@@ -73,6 +74,131 @@ def _apply_11x17_portrait_layout(ws):
     ws.page_margins.right = 0.25
     ws.page_margins.top = 0.5
     ws.page_margins.bottom = 0.5
+
+
+def build_job_shipping_report_rows(
+    schedule_data_frame,
+    mold_schedule_frame,
+    mold_day_dates,
+    pour_day_dates,
+    cleaning_days=14,
+):
+    """Build job-level shipping outlook rows from backfilled mold/pour assignments."""
+    if schedule_data_frame is None or schedule_data_frame.empty:
+        return []
+
+    base = schedule_data_frame.copy()
+    base[Columns.COL_DUE_DATE] = base[Columns.COL_DUE_DATE].apply(_normalize_date_value)
+
+    planned_molds = (
+        base.groupby(Columns.COL_JOB_NUMBER, dropna=False)["Molds for EXT"]
+        .sum()
+        .rename("Planned Molds")
+    )
+    due_dates = (
+        base.groupby(Columns.COL_JOB_NUMBER, dropna=False)[Columns.COL_DUE_DATE]
+        .min()
+        .rename("Due Date")
+    )
+
+    job_summary = pd.concat([planned_molds, due_dates], axis=1).reset_index()
+
+    if mold_schedule_frame is None or mold_schedule_frame.empty:
+        job_summary["Scheduled Molds"] = 0
+        job_summary["Mold Day"] = pd.NA
+        job_summary["Pour Day"] = pd.NA
+    else:
+        assigned = mold_schedule_frame.copy()
+        assigned_molds = (
+            assigned.groupby(Columns.COL_JOB_NUMBER, dropna=False)["Molds for EXT"]
+            .sum()
+            .rename("Scheduled Molds")
+        )
+        mold_day = (
+            assigned.groupby(Columns.COL_JOB_NUMBER, dropna=False)["Schedule Day"]
+            .min()
+            .rename("Mold Day")
+        )
+        pour_day = (
+            assigned.groupby(Columns.COL_JOB_NUMBER, dropna=False)["Pour Schedule Day"]
+            .max()
+            .rename("Pour Day")
+        )
+        assigned_summary = pd.concat([assigned_molds, mold_day, pour_day], axis=1).reset_index()
+        job_summary = job_summary.merge(
+            assigned_summary,
+            on=Columns.COL_JOB_NUMBER,
+            how="left",
+        )
+        job_summary["Scheduled Molds"] = job_summary["Scheduled Molds"].fillna(0)
+
+    def _resolve_day_date(day_value, day_map):
+        try:
+            day_key = int(day_value)
+        except (TypeError, ValueError):
+            return pd.NaT
+        return _normalize_date_value(day_map.get(day_key, {}).get("date", pd.NaT))
+
+    job_summary["Mold Date"] = job_summary["Mold Day"].apply(lambda value: _resolve_day_date(value, mold_day_dates))
+    job_summary["Pour Date"] = job_summary["Pour Day"].apply(lambda value: _resolve_day_date(value, pour_day_dates))
+    job_summary["Expected Ship Date"] = job_summary["Pour Date"].apply(
+        lambda pour_date: pour_date + pd.Timedelta(days=cleaning_days) if not pd.isna(pour_date) else pd.NaT
+    )
+
+    job_summary["Ship Buffer Days"] = [
+        int((due_date - expected_ship).days)
+        if not pd.isna(due_date) and not pd.isna(expected_ship)
+        else None
+        for due_date, expected_ship in zip(job_summary["Due Date"], job_summary["Expected Ship Date"])
+    ]
+
+    def _schedule_status(row):
+        planned = float(row.get("Planned Molds", 0) or 0)
+        scheduled = float(row.get("Scheduled Molds", 0) or 0)
+        if scheduled <= 0:
+            return "Not Yet Scheduled"
+        if scheduled + 1e-9 < planned:
+            return "Partially Scheduled"
+        return "Scheduled"
+
+    def _on_time_status(row):
+        status = row.get("Schedule Status", "")
+        buffer_days = row.get("Ship Buffer Days", None)
+        if status == "Not Yet Scheduled":
+            return "NOT SCHEDULED"
+        if buffer_days is None:
+            return "UNKNOWN"
+        return "YES" if buffer_days >= 0 else "NO"
+
+    job_summary["Schedule Status"] = job_summary.apply(_schedule_status, axis=1)
+    job_summary["On-Time"] = job_summary.apply(_on_time_status, axis=1)
+
+    job_summary = job_summary.sort_values(
+        by=["Schedule Status", Columns.COL_DUE_DATE, Columns.COL_JOB_NUMBER],
+        ascending=[True, True, True],
+        na_position="last",
+    )
+
+    rows = []
+    for _, row in job_summary.iterrows():
+        rows.append(
+            {
+                "Job Number": row.get(Columns.COL_JOB_NUMBER, ""),
+                "Schedule Status": row.get("Schedule Status", ""),
+                "Planned Molds": int(row.get("Planned Molds", 0) or 0),
+                "Scheduled Molds": int(row.get("Scheduled Molds", 0) or 0),
+                "Mold Day": int(row["Mold Day"]) if pd.notna(row.get("Mold Day", pd.NA)) else "",
+                "Mold Date": _normalize_due_date(row.get("Mold Date", "")),
+                "Pour Day": int(row["Pour Day"]) if pd.notna(row.get("Pour Day", pd.NA)) else "",
+                "Pour Date": _normalize_due_date(row.get("Pour Date", "")),
+                "Expected Ship Date": _normalize_due_date(row.get("Expected Ship Date", "")),
+                "Due Date": _normalize_due_date(row.get("Due Date", "")),
+                "Ship Buffer Days": row.get("Ship Buffer Days", ""),
+                "On-Time": row.get("On-Time", ""),
+            }
+        )
+
+    return rows
 
 
 def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
@@ -247,7 +373,7 @@ def build_excel_rows(export_blocks):
     return excel_rows
 
 
-def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
+def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_shipping_rows=None):
     """
     Write the mold schedule to an Excel workbook.
 
@@ -376,6 +502,112 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx"):
             ws.column_dimensions[col].width = width
 
         _apply_11x17_portrait_layout(ws)
+
+        if job_shipping_rows:
+            ws_jobs = wb.create_sheet("Job Shipping Outlook")
+            fill_green = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
+            fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
+            fill_orange = PatternFill(fill_type="solid", start_color="FCE4D6", end_color="FCE4D6")
+            fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
+            fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
+
+            headers = [
+                "Job Number",
+                "Schedule Status",
+                "Planned Molds",
+                "Scheduled Molds",
+                "Mold Day",
+                "Mold Date",
+                "Pour Day",
+                "Pour Date",
+                "Expected Ship Date",
+                "Due Date",
+                "Ship Buffer Days",
+                "On-Time",
+            ]
+
+            for col_num, header in enumerate(headers, start=1):
+                cell = ws_jobs.cell(1, col_num, header)
+                cell.font = bold
+                cell.border = thin
+
+            row_num = 2
+            for row in job_shipping_rows:
+                values = [
+                    row.get("Job Number", ""),
+                    row.get("Schedule Status", ""),
+                    row.get("Planned Molds", ""),
+                    row.get("Scheduled Molds", ""),
+                    row.get("Mold Day", ""),
+                    row.get("Mold Date", ""),
+                    row.get("Pour Day", ""),
+                    row.get("Pour Date", ""),
+                    row.get("Expected Ship Date", ""),
+                    row.get("Due Date", ""),
+                    row.get("Ship Buffer Days", ""),
+                    row.get("On-Time", ""),
+                ]
+
+                for col_num, value in enumerate(values, start=1):
+                    cell = ws_jobs.cell(row_num, col_num, value)
+                    cell.border = thin
+                    if col_num in {6, 8, 9, 10} and value != "":
+                        cell.number_format = "m/d/yyyy"
+
+                schedule_status = str(row.get("Schedule Status", "")).strip().upper()
+                on_time = str(row.get("On-Time", "")).strip().upper()
+                buffer_value = row.get("Ship Buffer Days", None)
+
+                if schedule_status == "SCHEDULED":
+                    ws_jobs.cell(row_num, 2).fill = fill_green
+                elif schedule_status == "PARTIALLY SCHEDULED":
+                    ws_jobs.cell(row_num, 2).fill = fill_yellow
+                elif schedule_status == "NOT YET SCHEDULED":
+                    ws_jobs.cell(row_num, 2).fill = fill_orange
+
+                if on_time == "YES":
+                    ws_jobs.cell(row_num, 12).fill = fill_green
+                elif on_time == "NO":
+                    ws_jobs.cell(row_num, 12).fill = fill_red
+                elif on_time == "NOT SCHEDULED":
+                    ws_jobs.cell(row_num, 12).fill = fill_orange
+                else:
+                    ws_jobs.cell(row_num, 12).fill = fill_gray
+
+                try:
+                    if buffer_value is None or pd.isna(buffer_value):
+                        ws_jobs.cell(row_num, 11).fill = fill_gray
+                    else:
+                        buffer_days = int(buffer_value)
+                        if buffer_days < 0:
+                            ws_jobs.cell(row_num, 11).fill = fill_red
+                        elif buffer_days < 4:
+                            ws_jobs.cell(row_num, 11).fill = fill_yellow
+                        else:
+                            ws_jobs.cell(row_num, 11).fill = fill_green
+                except (TypeError, ValueError):
+                    ws_jobs.cell(row_num, 11).fill = fill_gray
+
+                row_num += 1
+
+            widths = {
+                "A": 12,
+                "B": 18,
+                "C": 12,
+                "D": 13,
+                "E": 9,
+                "F": 11,
+                "G": 9,
+                "H": 11,
+                "I": 14,
+                "J": 11,
+                "K": 14,
+                "L": 10,
+            }
+            for col, width in widths.items():
+                ws_jobs.column_dimensions[col].width = width
+
+            _apply_11x17_portrait_layout(ws_jobs)
 
         wb.save(output_file)
         print(f"Saved: {output_file}")
