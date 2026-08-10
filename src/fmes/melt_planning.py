@@ -81,16 +81,53 @@ def prioritize_schedule_rows(schedule_df, reference_date=None):
         by=[
             "Planning Priority Rank",
             "Due Date Sort",
-            ALLOY_COMPATIBILITY_GROUP_COLUMN,
-            Columns.COL_ALLOY,
             Columns.COL_JOB_NUMBER,
             "Extension_Seq",
         ],
-        ascending=[True, True, True, True, True, True],
+        ascending=[True, True, True, True],
         na_position="last",
     ).reset_index(drop=True)
 
     return prioritized
+
+
+def order_rows_for_alloy_grouping(schedule_df):
+    """Order prioritized rows to maximize batching within alloy compatibility groups."""
+    if schedule_df.empty:
+        return schedule_df.copy()
+
+    ordered = schedule_df.copy()
+
+    if ALLOY_COMPATIBILITY_GROUP_COLUMN not in ordered.columns:
+        ordered[ALLOY_COMPATIBILITY_GROUP_COLUMN] = ordered[Columns.COL_ALLOY].fillna("")
+    if ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN not in ordered.columns:
+        ordered[ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN] = "NO"
+    if "Extension_Seq" not in ordered.columns:
+        ordered["Extension_Seq"] = 0
+
+    ordered["_Compat_All_Rank"] = (
+        ordered[ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .apply(lambda value: 0 if value == "YES" else 1)
+    )
+
+    ordered = ordered.sort_values(
+        by=[
+            "Planning Priority Rank",
+            ALLOY_COMPATIBILITY_GROUP_COLUMN,
+            "_Compat_All_Rank",
+            Columns.COL_ALLOY,
+            "Due Date Sort",
+            Columns.COL_JOB_NUMBER,
+            "Extension_Seq",
+        ],
+        ascending=[True, True, True, True, True, True, True],
+        na_position="last",
+    ).reset_index(drop=True)
+
+    return ordered.drop(columns=["_Compat_All_Rank"])
 
 
 def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
@@ -152,6 +189,7 @@ def build_melt_schedule(
 
     reference_date = _normalize_reference_date(reference_date)
     planned_rows = prioritize_schedule_rows(schedule_df, reference_date=reference_date)
+    planned_rows = order_rows_for_alloy_grouping(planned_rows)
     planned_rows = assign_heat_numbers(
         planned_rows,
         heat_weight_limit_lbs=heat_weight_limit_lbs,

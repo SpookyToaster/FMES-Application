@@ -54,9 +54,9 @@ Production conditions will change daily. The system should adapt rather than att
 
 ### In Progress
 
-- Wiring melt schedule output ([src/fmes/melt_planning.py](src/fmes/melt_planning.py)) into orchestration and user-facing exports
 - Schedule persistence model is still not in use for run-to-run carryforward
-- Planning model redesign in progress: melt-first with mold backfill (strictest-anchor grouping, 10-mold cap handling, backfill loop)
+- Planning model refinement in progress: heat-first with mold backfill, 10-week melt horizon, alloy-group-first batching, and planner preview tooling
+- Due-date-vs-grouping tradeoff review is in progress against live OOR data before further optimization
 
 ### Open Gaps
 
@@ -166,8 +166,8 @@ LastModified
 
 ### Melt WIP Schedule
 
-- Partially completed: initial melt schedule builder exists with fixed daily slots (5 planned heats + 1 reserved contingency heat) and overflow flagging
-- Remaining: wire melt schedule into orchestration/exports and track melt work-in-progress
+- Partially completed: melt planning is now part of the active orchestration path, using a 10-week horizon, 5 planned heats + 1 reserved contingency slot, alloy compatibility grouping, and mold backfill
+- Remaining: validate grouping quality against due-date urgency, improve planner diagnostics, and track melt work-in-progress explicitly
 
 ### Alloy Chemistry Compatibility
 
@@ -240,6 +240,6 @@ LastModified
 
 ## Next 3 Priorities
 
-1. Implement a melt-first day planner (5 planned heats + 1 reserved contingency slot) and backfill required molding by day.
+1. Validate the current 10-week, alloy-group-first heat planner against live due-date behavior and refine the batching rules where urgency is harmed.
 2. Preserve prior run assignments to reduce schedule churn between runs.
-3. Expand CSV-driven alloy compatibility handling (group validation, unknown-alloy exceptions, and planner integration).
+3. Expand planner diagnostics and alloy compatibility guardrails (group validation, unknown-alloy exceptions, preview/report integration).

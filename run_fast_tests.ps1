@@ -20,12 +20,12 @@ $testModules = @(
 
 Push-Location $repoRoot
 try {
-    $args = @('-m', 'unittest') + $testModules
+    $testArgs = @('-m', 'unittest') + $testModules
     if ($AdditionalArgs) {
-        $args += $AdditionalArgs
+        $testArgs += $AdditionalArgs
     }
 
-    & $pythonExe @args
+    & $pythonExe @testArgs
 }
 finally {
     Pop-Location

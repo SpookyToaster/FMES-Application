@@ -7,7 +7,7 @@
 
 ## Overview
 
-Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that reads the Open Order Report, filters eligible jobs, expands them into schedule rows, assigns production days, and exports formatted schedule workbooks.
+Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that reads the Open Order Report, filters eligible jobs, expands them into extension rows, builds a heat-first pour plan, back-fills molding days from those heats, and exports formatted planner workbooks.
 
 The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.py) is the operational entrypoint (also used by PyInstaller), [src/fmes/main.py](src/fmes/main.py) provides the CLI, [src/fmes/scheduler.py](src/fmes/scheduler.py) provides architectural logic, and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
@@ -37,10 +37,10 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### In Progress
 
-- Wiring melt schedule output into user-facing exports and orchestration
 - SQL Server integration beyond reporting reads (write-back schedule persistence)
 - Persistent schedule state between runs
-- Melt-first planning redesign so molding and heat schedules are planned together
+- Refining the heat-first planning model so alloy-group batching and due-date urgency stay balanced
+- Expanding planner-facing preview/diagnostic workflows so iteration can happen without full exports
 
 ### Not Started
 
@@ -57,17 +57,17 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 - [run_scheduler.py](run_scheduler.py) is the canonical executable entrypoint (`python run_scheduler.py --source sql`).
 - [src/fmes/main.py](src/fmes/main.py) provides the CLI, logging setup, and export calls.
 - [src/fmes/scheduler.py](src/fmes/scheduler.py) coordinates the schedule-building pipeline as a library module.
-- It loads input, filters jobs, builds schedule rows, assigns days, groups by day, prints summaries, and exports the final workbook.
+- It loads input, filters jobs, builds extension rows, applies a 10-week melt-planning horizon, builds the heat-first plan, back-fills molding days from the planned heats, and returns the data needed for mold and heat exports.
 
 ### Module Boundaries
 
 - [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) reads scheduler input (SQL or Excel) and syncs the Open Order Report workbook.
 - [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py) filters rows down to jobs eligible for molding.
-- [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py) expands jobs into extensions, assigns days, and builds daily schedule views.
+- [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py) expands jobs into extensions and back-fills molding days from the heat plan while enforcing molding capacity constraints.
 - [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
 - [src/fmes/scheduler_validation.py](src/fmes/scheduler_validation.py) validates SQL rows and writes missing-job audit logs.
 - [src/fmes/alloy_compatibility.py](src/fmes/alloy_compatibility.py) loads the compatibility CSV and evaluates directional co-pour rules.
-- [src/fmes/melt_planning.py](src/fmes/melt_planning.py) assigns heat numbers and builds the initial melt schedule (5+1 slots).
+- [src/fmes/melt_planning.py](src/fmes/melt_planning.py) prioritizes due dates, applies alloy-group-first batching, assigns heat numbers, and builds the initial melt schedule (5 planned heats + 1 reserved slot).
 - [src/fmes/workbook_sync.py](src/fmes/workbook_sync.py) performs OOXML-level workbook writes, snapshots, and calcChain cleanup.
 
 ### Database & Reporting Modules
@@ -116,15 +116,21 @@ Integration tests (require live DB credentials; excluded from default discovery)
 - Skips jobs requiring zero or fewer molds.
 - Splits jobs into extensions based on a 2300 lb cap and a 10 mold cap per extension.
 - Preserves extension continuity after partial completion by consuming completed molds from earliest extensions first.
-- Assigns each schedule row to days while respecting line/floor per-job daily limits (6/3), and allows an extension to span multiple days when needed.
-- Assigns per-day heat numbers based on alloy continuity and 2300 lb maximum per heat.
+- Filters melt-planning input to jobs due within the next 10 weeks.
+- Prioritizes the next 2 weeks as highest priority, then the remaining 10-week horizon as priority review.
+- Batches melt rows by alloy compatibility group before heat assignment so compatible alloys run together when possible.
+- Caps grouped heats at 2300 lbs and 10 molds, while allowing a single oversize row to occupy its own heat when needed.
+- Reserves heat slot 6 each day for remakes, drop-ins, and planner intervention.
+- Back-fills molding days from planned heats while enforcing mold-before-pour and a maximum 3-day mold sit window.
+- Uses casting type, not L/F bucket heuristics, to determine line vs floor capacity usage.
 
 ### Planning Direction (Draft)
 
-- Shift from mold-only greedy planning to melt-first planning with mold backfill.
-- Daily heat policy target is 5 planned heats plus 1 reserved placeholder heat for remakes, drop-ins, and late substitutions.
-- Extensions remain the core planning unit and should stay intact through heat grouping whenever possible.
-- Alloy co-pour decisions are moving to a reference-data model instead of hardcoded alloy checks.
+- The active planning model is heat-first with mold backfill.
+- Melt input is intentionally limited to the next 10 weeks so far-out jobs do not consume early heat capacity.
+- Rows are grouped by alloy compatibility group before heat assignment to maximize useful heats within each alloy family.
+- Due-date urgency still drives priority windows, and the next refinement step is balancing urgency against same-group batching when the two conflict.
+- Alloy co-pour decisions are driven by reference data rather than hardcoded alloy checks.
 
 ### Alloy Compatibility Reference Data
 
@@ -139,8 +145,9 @@ Integration tests (require live DB credentials; excluded from default discovery)
 - Prints day-by-day mold totals.
 - Exports a formatted workbook named `Mold Schedule.xlsx`.
 - Exports `Heat Summary.xlsx` with:
-        - `Heat Summary` sheet (date + heat + alloy + lbs + molds)
+        - `Heat Summary` sheet (planner day blocks by pour day / heat)
         - `Daily Heat Totals` sheet (heats/day + lbs/day + molds/day)
+- Supports non-export planning inspection through `run_heat_grouping_preview.py` for alloy-group and heat batching review.
 
 ### Database Reporting Behavior
 
@@ -179,10 +186,19 @@ mold_scheduler()
 build_schedule_rows()
         │
         ▼
-assign_days()
+prioritize_schedule_rows()
         │
         ▼
-build_daily_schedules()
+apply 10-week melt horizon
+        │
+        ▼
+order_rows_for_alloy_grouping()
+        │
+        ▼
+build_melt_schedule()
+        │
+        ▼
+assign_mold_days_from_heat_plan()
         │
         ▼
 build_schedule_dates()
@@ -231,7 +247,16 @@ This runs only:
 - `tests.test_scheduler_integration`
 - `tests.test_mold_schedule_from_melt`
 
-Current verification snapshot: 39 unit tests passing.
+To preview how melt input rows are grouped into alloy-based heats (without export), run:
+
+```powershell
+.venv\Scripts\python.exe run_heat_grouping_preview.py --source excel --max-detail-rows 80
+```
+
+Current working verification for fast planning iteration:
+
+- `.\run_fast_tests.ps1`
+- `python.exe .\run_heat_grouping_preview.py --source excel --max-detail-rows 80`
 
 The current suite covers:
 
@@ -239,7 +264,7 @@ The current suite covers:
 - file loading
 - filtering rules
 - job expansion and day assignment
-- melt planning heat grouping (5+1 slots, compatibility, overflow)
+- melt planning heat grouping (5 planned + 1 reserved slot, compatibility grouping, overflow)
 - export block generation and workbook writing
 - end-to-end orchestration
 
@@ -306,15 +331,15 @@ Key objectives include:
 
 ## Future Direction
 
-The current codebase is structured so additional schedule types can be added later, such as melt or cleaning schedules, without reworking the mold scheduling pipeline.
+The current codebase is structured so additional schedule types can be added later, but the immediate focus is improving the heat-first planning model rather than expanding to brand-new schedule types.
 
 Planned next steps still align with the roadmap:
 
+- validate alloy-group-first batching against due-date urgency on live OOR data
+- improve planner-facing diagnostics and preview tooling before full export runs
 - persistent schedule management
 - work-in-progress tracking
-- additional schedule types
 - historical schedule analysis
-- automated reporting and notifications
 
 ## FMES Evolution Plan
 
