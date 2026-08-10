@@ -2,13 +2,10 @@
 
 import pandas as pd
 
-from config import Columns
+from config import Columns, Paths
 
 
-DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\compatibleAlloys\alloy_compatibility.csv"
-)
+DEFAULT_ALLOY_COMPATIBILITY_CSV_PATH = str(Paths.ALLOY_COMPATIBILITY_CSV)
 
 ALLOY_COMPATIBILITY_GROUP_COLUMN = "Compatibility Group"
 ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN = "Compatible With ASTM Group"

@@ -11,20 +11,15 @@ Main.py provides one command that runs the full end-to-end flow:
 import argparse
 import os
 
+from config import Paths
 from Database import validate_database_environment
 from Scheduler import Schedule_Molds
 from scheduler_export import Export_Heat_Summary, Export_Mold_Schedule
 
 
-DEFAULT_MOLD_OUTPUT = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Output\Mold Schedule.xlsx"
-)
+DEFAULT_MOLD_OUTPUT = str(Paths.MOLD_SCHEDULE_OUTPUT)
 
-DEFAULT_HEAT_OUTPUT = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Output\Heat Summary.xlsx"
-)
+DEFAULT_HEAT_OUTPUT = str(Paths.HEAT_SUMMARY_OUTPUT)
 
 
 def parse_args():

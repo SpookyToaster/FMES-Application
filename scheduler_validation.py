@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from config import Paths
+
 
 REQUIRED_SQL_TEXT_COLUMNS = [
     "Due Date",
@@ -13,9 +15,7 @@ REQUIRED_SQL_TEXT_COLUMNS = [
     "Job Number",
 ]
 
-MISSING_JOB_ID_LOG_DIR = Path(
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1\Quality\Schedule"
-)
+MISSING_JOB_ID_LOG_DIR = Path(Paths.MISSING_JOB_ID_LOG_DIR)
 MISSING_JOB_ID_LOG_PREFIX = "Missing_Job_ID_Removals"
 MISSING_JOB_ID_LOG_RETENTION_FILES = 12
 

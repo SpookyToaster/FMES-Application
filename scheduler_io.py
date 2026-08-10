@@ -15,7 +15,7 @@ from alloy_compatibility import (
     apply_alloy_compatibility,
     load_alloy_compatibility_map,
 )
-from config import Columns
+from config import Columns, Paths
 from DB_IO import get_main_dashboard_scheduler_rows
 from scheduler_validation import validate_sql_rows
 from workbook_sync import (
@@ -25,25 +25,13 @@ from workbook_sync import (
 )
 
 
-DEFAULT_OPEN_ORDER_REPORT_PATH = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Open Order Report.xlsx"
-)
+DEFAULT_OPEN_ORDER_REPORT_PATH = str(Paths.OPEN_ORDER_REPORT)
 
-DEFAULT_BACKUP_DIR = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Backups"
-)
+DEFAULT_BACKUP_DIR = str(Paths.BACKUP_DIR)
 
-DEFAULT_HISTORICAL_OOR_DIR = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Historical OORs"
-)
+DEFAULT_HISTORICAL_OOR_DIR = str(Paths.HISTORICAL_OOR_DIR)
 
-DEFAULT_DB_SNAPSHOT_DIR = (
-    r"C:\Users\lburkardt\OneDrive - MonettMetalsUS1"
-    r"\Quality\Schedule\Historical DB Snapshots"
-)
+DEFAULT_DB_SNAPSHOT_DIR = str(Paths.DB_SNAPSHOT_DIR)
 
 SQL_MAIN_EXPORT_COLUMNS = [
     "Due Date",

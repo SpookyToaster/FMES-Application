@@ -1,0 +1,39 @@
+[project]
+name = "fmes-scheduler"
+version = "0.1.0"
+description = "Foundry Management and Execution System (FMES) mold/melt scheduler for Monett Metals"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=3.0,<4",
+    "openpyxl>=3.1,<4",
+    "pyodbc>=5.0,<6",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.21"]
+
+[project.scripts]
+fmes = "Main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = [
+    "Main",
+    "Scheduler",
+    "config",
+    "Database",
+    "DB_IO",
+    "scheduler_io",
+    "scheduler_filter",
+    "scheduler_build",
+    "scheduler_export",
+    "scheduler_validation",
+    "alloy_compatibility",
+    "melt_planning",
+    "workbook_sync",
+    "load_historical_snapshot",
+    "check_db_env",
+]

@@ -4,3 +4,14 @@
 
 __pycache__/
 *.pyc
+
+.venv/
+venv/
+
+build/
+build_tmp/
+dist/
+dist_tmp/
+*.egg-info/
+
+.pytest_cache/
