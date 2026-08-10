@@ -47,7 +47,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
              patch("fmes.scheduler.assign_days", side_effect=lambda df: df.assign(**{"Schedule Day": 1})), \
-             patch("fmes.scheduler.build_daily_schedules", return_value={1: pd.DataFrame()}), \
+                         patch("fmes.scheduler.build_melt_schedule", return_value={1: {"rows": pd.DataFrame()}}), \
              patch("fmes.scheduler.build_schedule_dates", return_value={1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}), \
              patch("fmes.scheduler.build_daily_export_blocks", return_value=export_blocks), \
              patch("fmes.scheduler.print_export_blocks"), \

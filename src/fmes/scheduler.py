@@ -6,7 +6,8 @@ Orchestrates the full scheduling pipeline:
   2. Filter jobs eligible for mold scheduling.
   3. Expand jobs into extension-sized work chunks.
   4. Assign each chunk to a production day respecting daily mold capacity.
-  5. Attach calendar dates (skipping weekends) and heat numbers.
+    5. Build a per-day melt plan with heat assignments.
+    6. Back-fill the melt-plan rows into the mold schedule export shape.
   6. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
 
 Import schedule_molds() from fmes.main or tests.
@@ -21,11 +22,11 @@ import pandas as pd
 from .config import Columns
 from .scheduler_build import (
     assign_days,
-    build_daily_schedules,
     build_schedule_dates,
     build_schedule_rows,
     print_bucket,
 )
+from .melt_planning import build_melt_schedule
 
 from .scheduler_export import (
     build_daily_export_blocks,
@@ -121,8 +122,12 @@ def schedule_molds():
 
         print_bucket(schedule_data_frame)
 
-        logger.info("      Grouping days and assigning heat numbers...")
-        daily_schedules = build_daily_schedules(schedule_data_frame)
+        logger.info("      Building daily melt plan and assigning heat numbers...")
+        melt_schedule = build_melt_schedule(schedule_data_frame)
+        daily_schedules = {
+            day: day_plan["rows"].copy()
+            for day, day_plan in melt_schedule.items()
+        }
         day_dates = build_schedule_dates(
             daily_schedules,
             datetime.today() + timedelta(days=1),
