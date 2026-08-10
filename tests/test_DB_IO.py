@@ -46,6 +46,29 @@ class DBIOIntegrationTests(unittest.TestCase):
 					f"({column['type']}, nullable={column['nullable']})"
 				)
 
+	def test_list_oe_header_and_detail_columns(self):
+		"""
+		Integration test: print all column names of dbo.OEHEader and dbo.OEDetail.
+
+		Skipped when DB_* environment variables are not configured.
+		"""
+		try:
+			validate_database_environment()
+		except RuntimeError as exc:
+			self.skipTest(f"Database environment not configured: {exc}")
+
+		for table_name in ["OEHEader", "OEDetail"]:
+			columns = list_columns(table_name, schema="dbo")
+
+			self.assertGreater(len(columns), 0, f"No columns found for dbo.{table_name}.")
+
+			print(f"\nColumns for dbo.{table_name} ({len(columns)} total):")
+			for column in columns:
+				print(
+					f"- {column['ordinal']}: {column['name']} "
+					f"({column['type']}, nullable={column['nullable']})"
+				)
+
 if __name__ == "__main__":
 	unittest.main()
 
