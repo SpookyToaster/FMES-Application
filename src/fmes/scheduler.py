@@ -8,7 +8,7 @@ Orchestrates the full scheduling pipeline:
   4. Assign each chunk to a production day respecting daily mold capacity.
     5. Build a per-day melt plan with heat assignments.
     6. Back-fill the melt-plan rows into the mold schedule export shape.
-  6. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
+    7. Export the result to Mold Schedule.xlsx and Heat Summary.xlsx.
 
 Import schedule_molds() from fmes.main or tests.
 """
