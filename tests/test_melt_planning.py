@@ -203,6 +203,33 @@ class MeltPlanningTests(unittest.TestCase):
         self.assertEqual(melt_schedule[2]["planned_heat_count"], 1)
         self.assertEqual(melt_schedule[2]["rows"].iloc[0]["Heat #"], 1)
 
+    def test_prioritize_schedule_rows_uses_ten_week_boundary(self):
+        schedule_df = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "9401",
+                Columns.COL_DUE_DATE: "2026-10-19",  # 70 days after 2026-08-10
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Extension_Seq": 0,
+            },
+            {
+                Columns.COL_JOB_NUMBER: "9402",
+                Columns.COL_DUE_DATE: "2026-10-20",  # 71 days after 2026-08-10
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Extension_Seq": 1,
+            },
+        ])
+
+        prioritized = prioritize_schedule_rows(
+            schedule_df,
+            reference_date="2026-08-10",
+        )
+
+        by_job = prioritized.set_index(Columns.COL_JOB_NUMBER)
+        self.assertEqual(by_job.loc["9401", "Review Window"], "Next 10 Weeks")
+        self.assertEqual(by_job.loc["9402", "Review Window"], "Outside 10 Weeks")
+
 
 if __name__ == "__main__":
     unittest.main()
