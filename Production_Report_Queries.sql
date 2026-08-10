@@ -79,13 +79,19 @@ SELECT
     o.TotalValue AS [Total Value],
     s.PourWeight AS [Pour Weight],
     s.TotalPourWT AS [Total Pour WT],
-    s.CastingsPerMold AS [Castings Per Mold],
+    -- TOOLIMPRESSIONS is the ERP "# on" field; read live because it rarely changes and snapshots may be stale.
+    COALESCE(
+        TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.TOOLIMPRESSIONS))), '')),
+        0
+    ) AS [Castings Per Mold],
     s.QuantityOfCores AS [Quantity of Cores],
     s.CastingsProduced AS [Castings Produced],
     s.MoldsCompleted AS [Molds Completed]
 FROM dbo.OrderSnapshot s
 INNER JOIN TargetRun tr
     ON tr.RunId = s.RunId
+LEFT JOIN dbo.JCJobMaster jm
+    ON UPPER(LTRIM(RTRIM(jm.JOBNUMBER))) = UPPER(LTRIM(RTRIM(s.JobNumber)))
 LEFT JOIN OrdersByJob o
     ON o.JobNumber = UPPER(LTRIM(RTRIM(s.JobNumber)))
 WHERE (@MainStartDueDate IS NULL OR s.DueDate >= @MainStartDueDate)
