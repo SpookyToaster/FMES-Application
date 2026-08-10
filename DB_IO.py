@@ -50,32 +50,37 @@ MAIN_DASHBOARD_SQL = """
     ;WITH TargetRun AS (
         SELECT COALESCE(?, MAX(RunId)) AS RunId
         FROM dbo.SchedulerRun
+    ),
+    OrdersByJob AS (
+        SELECT
+            UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, ''))))) AS JobNumber,
+            MAX(NULLIF(LTRIM(RTRIM(h.CUSTOMERPO)), '')) AS CustomerPO,
+            SUM(COALESCE(d.QUANTITYORDERED, 0)) AS QuantityOrdered,
+            SUM(COALESCE(d.PIECESSHIPPEDTODATE, 0)) AS QuantityShippedToDate,
+            MAX(h.SHIPDATE) AS ShipDate,
+            SUM(COALESCE(d.EXTENDEDORDERVALUE, 0)) AS TotalValue
+        FROM dbo.OEDetail d
+        INNER JOIN dbo.OEHEader h
+            ON h.ORDERNUMBER = d.ORDERNUMBER
+        WHERE COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) IS NOT NULL
+        GROUP BY
+            UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))))
     )
     SELECT
-        s.DueDate AS [Due Date],
-        s.CustomerName AS [Customer Name],
-        s.PartNumber AS [Part Number],
-        s.JobType AS [Job Type],
         s.JobNumber AS [Job Number],
-        s.Alloy AS [Alloy],
-        s.CastingType AS [Casting Type],
-        s.QtyOrdered AS [QTY Ordered],
-        s.QuantityOfMolds AS [Quantity of Molds],
-        s.CastingsPerMold AS [Castings Per Mold],
-        s.QuantityOfCores AS [Quantity of Cores],
-        s.PourWeight AS [Pour Weight],
-        s.TotalPourWT AS [Total Pour WT],
-        s.TotalValue AS [Total Value],
-        s.HeatNoAssigned AS [Heat No Assigned],
-        s.CastingsProduced AS [Castings Produced],
-        s.MoldsCompleted AS [Molds Completed]
+        o.CustomerPO AS [Customer PO],
+        o.QuantityOrdered AS [Quantity Ordered],
+        o.QuantityShippedToDate AS [Quantity Shipped To Date],
+        o.ShipDate AS [Ship Date],
+        o.TotalValue AS [Total Value]
     FROM dbo.OrderSnapshot s
     INNER JOIN TargetRun tr
         ON tr.RunId = s.RunId
+    LEFT JOIN OrdersByJob o
+        ON o.JobNumber = UPPER(LTRIM(RTRIM(s.JobNumber)))
     WHERE (? IS NULL OR s.DueDate >= ?)
       AND (? IS NULL OR s.DueDate < DATEADD(DAY, 1, ?))
     ORDER BY
-        s.DueDate,
         s.JobNumber;
 """
 
@@ -395,12 +400,10 @@ def get_orders_dashboard_rows(start_date=None, end_date=None):
 
 def get_main_dashboard_rows(run_id=None, start_due_date=None, end_due_date=None):
     """
-    Return main dashboard rows using history tables when available, otherwise
-    fall back to live OE header/detail tables.
+    Return reduced main dashboard rows keyed by Job Number.
 
     Args:
-        run_id: SchedulerRun.RunId to target, or None for latest available run
-            when history tables exist.
+        run_id: SchedulerRun.RunId to target, or None for latest available run.
         start_due_date: Inclusive lower bound for DueDate, or None.
         end_due_date: Inclusive upper bound for DueDate, or None.
 
@@ -427,6 +430,24 @@ def get_main_dashboard_rows(run_id=None, start_due_date=None, end_due_date=None)
             append_missing_job_id_audit(cursor, "live")
             cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
 
+        rows = cursor.fetchall()
+        return _rows_to_dicts(cursor, rows)
+    finally:
+        connection.close()
+
+
+def get_main_dashboard_scheduler_rows():
+    """
+    Return full scheduler-compatible main dashboard rows from the live query.
+
+    This projection includes mold, alloy, weight, and heat fields required by
+    SQL-to-workbook sync and scheduler input normalization.
+    """
+    connection = connect()
+    try:
+        cursor = connection.cursor()
+        append_missing_job_id_audit(cursor, "live_scheduler")
+        cursor.execute(MAIN_DASHBOARD_LIVE_SQL)
         rows = cursor.fetchall()
         return _rows_to_dicts(cursor, rows)
     finally:

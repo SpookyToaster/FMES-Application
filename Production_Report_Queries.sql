@@ -54,30 +54,35 @@ DECLARE @MainEndDueDate   DATE = NULL;
 ;WITH TargetRun AS (
     SELECT COALESCE(@RunId, MAX(RunId)) AS RunId
     FROM dbo.SchedulerRun
+),
+OrdersByJob AS (
+    SELECT
+        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, ''))))) AS JobNumber,
+        MAX(NULLIF(LTRIM(RTRIM(h.CUSTOMERPO)), '')) AS CustomerPO,
+        SUM(COALESCE(d.QUANTITYORDERED, 0)) AS QuantityOrdered,
+        SUM(COALESCE(d.PIECESSHIPPEDTODATE, 0)) AS QuantityShippedToDate,
+        MAX(h.SHIPDATE) AS ShipDate,
+        SUM(COALESCE(d.EXTENDEDORDERVALUE, 0)) AS TotalValue
+    FROM dbo.OEDetail d
+    INNER JOIN dbo.OEHEader h
+        ON h.ORDERNUMBER = d.ORDERNUMBER
+    WHERE COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')) IS NOT NULL
+    GROUP BY
+        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))))
 )
 SELECT
-    s.DueDate AS [Due Date],
-    s.CustomerName AS [Customer Name],
-    s.PartNumber AS [Part Number],
-    s.JobType AS [Job Type],
     s.JobNumber AS [Job Number],
-    s.Alloy AS [Alloy],
-    s.CastingType AS [Casting Type],
-    s.QtyOrdered AS [QTY Ordered],
-    s.QuantityOfMolds AS [Quantity of Molds],
-    s.CastingsPerMold AS [Castings Per Mold],
-    s.QuantityOfCores AS [Quantity of Cores],
-    s.PourWeight AS [Pour Weight],
-    s.TotalPourWT AS [Total Pour WT],
-    s.TotalValue AS [Total Value],
-    s.HeatNoAssigned AS [Heat No Assigned],
-    s.CastingsProduced AS [Castings Produced],
-    s.MoldsCompleted AS [Molds Completed]
+    o.CustomerPO AS [Customer PO],
+    o.QuantityOrdered AS [Quantity Ordered],
+    o.QuantityShippedToDate AS [Quantity Shipped To Date],
+    o.ShipDate AS [Ship Date],
+    o.TotalValue AS [Total Value]
 FROM dbo.OrderSnapshot s
 INNER JOIN TargetRun tr
     ON tr.RunId = s.RunId
+LEFT JOIN OrdersByJob o
+    ON o.JobNumber = UPPER(LTRIM(RTRIM(s.JobNumber)))
 WHERE (@MainStartDueDate IS NULL OR s.DueDate >= @MainStartDueDate)
   AND (@MainEndDueDate IS NULL OR s.DueDate < DATEADD(DAY, 1, @MainEndDueDate))
 ORDER BY
-    s.DueDate,
     s.JobNumber;

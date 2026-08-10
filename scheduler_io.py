@@ -17,7 +17,7 @@ from alloy_compatibility import (
     load_alloy_compatibility_map,
 )
 from config import Columns
-from DB_IO import get_main_dashboard_rows
+from DB_IO import get_main_dashboard_scheduler_rows
 from scheduler_validation import validate_sql_rows
 from workbook_sync import (
     export_worksheet_values,
@@ -142,11 +142,7 @@ def Sync_Open_Order_Report_With_SQL(
     )
     export_worksheet_values(source_path, "OOR", historical_oor_path)
 
-    sql_rows = get_main_dashboard_rows(
-        run_id=run_id,
-        start_due_date=start_due_date,
-        end_due_date=end_due_date,
-    )
+    sql_rows = get_main_dashboard_scheduler_rows()
     sql_rows = _exclude_rows_by_customer_name(sql_rows)
     sql_rows = validate_sql_rows(sql_rows)
 
@@ -262,11 +258,7 @@ def Read_File(
             return apply_alloy_compatibility(imported_file, compatibility_map)
 
         if source == "sql":
-            raw_rows = get_main_dashboard_rows(
-                run_id=run_id,
-                start_due_date=start_due_date,
-                end_due_date=end_due_date,
-            )
+            raw_rows = get_main_dashboard_scheduler_rows()
             raw_rows = _exclude_rows_by_customer_name(raw_rows)
             raw_rows = validate_sql_rows(raw_rows)
             normalized = _normalize_sql_rows(raw_rows)
