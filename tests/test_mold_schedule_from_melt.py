@@ -137,6 +137,59 @@ class MoldScheduleFromMeltTests(unittest.TestCase):
             ).all()
         )
 
+    def test_lf_buckets_do_not_change_heat_grouping(self):
+        schedule_rows = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "MS3001",
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 100,
+                Columns.COL_DUE_DATE: "2026-08-20",
+                "EXT": "A",
+                "Extension_Seq": 0,
+                "Molds for EXT": 6,
+                "Total Weight per EXT": 600,
+            },
+            {
+                Columns.COL_JOB_NUMBER: "MS3002",
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                Columns.COL_CAST_TYPE: "F",
+                Columns.COL_POUR_WEIGHT: 350,
+                Columns.COL_DUE_DATE: "2026-08-20",
+                "EXT": "A",
+                "Extension_Seq": 1,
+                "Molds for EXT": 4,
+                "Total Weight per EXT": 1400,
+            },
+        ])
+
+        melt_schedule = build_melt_schedule(schedule_rows)
+        planned_heat_rows = pd.concat(
+            [day_plan["rows"] for day_plan in melt_schedule.values()],
+            ignore_index=True,
+        )
+
+        # Same alloy rows should remain in one planned heat regardless of L/F bucket.
+        self.assertEqual(planned_heat_rows["Heat #"].nunique(), 1)
+
+        assigned_mold_rows, day_offset = assign_mold_days_from_heat_plan(planned_heat_rows)
+
+        # Backfill may move molding earlier, but should preserve the pour-day heat grouping.
+        self.assertGreaterEqual(day_offset, 0)
+        self.assertEqual(assigned_mold_rows["Heat #"].nunique(), 1)
+        self.assertTrue(
+            (
+                assigned_mold_rows["Schedule Day"]
+                <= (assigned_mold_rows["Pour Schedule Day"] + day_offset)
+            ).all()
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
