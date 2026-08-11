@@ -143,6 +143,7 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
         schedule_result["pour_day_dates"],
         heat_output_file,
         mold_schedule_frame=schedule_result.get("mold_schedule_frame", None),
+        mold_day_dates=schedule_result.get("mold_day_dates", None),
     )
     logger.info("      Saved: %s", heat_output_file)
 
@@ -182,6 +183,7 @@ def run_heat_schedule(heat_output_file=DEFAULT_HEAT_OUTPUT):
         schedule_result["pour_day_dates"],
         heat_output_file,
         mold_schedule_frame=schedule_result.get("mold_schedule_frame", None),
+        mold_day_dates=schedule_result.get("mold_day_dates", None),
     )
     logger.info("      Saved: %s", heat_output_file)
 

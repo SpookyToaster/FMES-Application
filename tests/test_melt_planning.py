@@ -232,6 +232,42 @@ class MeltPlanningTests(unittest.TestCase):
         self.assertEqual(heat_totals.get(1), 2300)
         self.assertEqual(heat_totals.get(2), 900)
 
+    def test_build_melt_schedule_keeps_flexible_rows_due_order_before_group_efficiency(self):
+        schedule_df = pd.DataFrame([
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "9701",
+                Columns.COL_DUE_DATE: "2026-09-01",  # 22 days from 2026-08-10
+                Columns.COL_ALLOY: "ALLOY-Z",
+                "Compatibility Group": "Z-GROUP",
+                "Compatible With ASTM Group": "NO",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 1200,
+                "Molds for EXT": 2,
+                "Extension_Seq": 0,
+                "EXT": "A",
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "9702",
+                Columns.COL_DUE_DATE: "2026-10-09",  # 60 days from 2026-08-10
+                Columns.COL_ALLOY: "ALLOY-A",
+                "Compatibility Group": "A-GROUP",
+                "Compatible With ASTM Group": "NO",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 1200,
+                "Molds for EXT": 2,
+                "Extension_Seq": 1,
+                "EXT": "B",
+            },
+        ])
+
+        melt_schedule = build_melt_schedule(schedule_df, reference_date="2026-08-10")
+        planned_rows = melt_schedule[1]["rows"]
+
+        self.assertEqual(planned_rows.iloc[0][Columns.COL_JOB_NUMBER], "9701")
+        self.assertTrue(planned_rows.iloc[0]["Days Until Due"] < planned_rows.iloc[1]["Days Until Due"])
+
     def test_build_melt_schedule_allows_single_row_weight_over_limit(self):
         schedule_df = pd.DataFrame([
             {

@@ -19,6 +19,7 @@ HEAT_MOLD_LIMIT = 10
 DAILY_WEIGHT_TARGET_LBS = 10000
 HIGHEST_PRIORITY_WINDOW_DAYS = 14
 PRIORITY_REVIEW_WINDOW_DAYS = 70
+FLEXIBLE_DUE_BAND_DAYS = 7
 
 
 def _normalize_due_date(value):
@@ -125,34 +126,45 @@ def order_rows_for_alloy_grouping(
     rank_values = sorted(ordered["Planning Priority Rank"].dropna().unique().tolist())
     for rank in rank_values:
         rank_df = ordered[ordered["Planning Priority Rank"] == rank].copy()
-        for group in sorted(rank_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str).unique().tolist()):
-            group_df = rank_df[
-                rank_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str) == group
-            ].copy()
-            urgent_df = group_df[
-                pd.to_numeric(group_df["Days Until Due"], errors="coerce") <= HIGHEST_PRIORITY_WINDOW_DAYS
-            ].copy()
-            flexible_df = group_df[
-                pd.to_numeric(group_df["Days Until Due"], errors="coerce") > HIGHEST_PRIORITY_WINDOW_DAYS
-            ].copy()
+        urgent_rank_df = rank_df[
+            pd.to_numeric(rank_df["Days Until Due"], errors="coerce") <= HIGHEST_PRIORITY_WINDOW_DAYS
+        ].copy()
+        if not urgent_rank_df.empty:
+            urgent_rank_df = urgent_rank_df.sort_values(
+                by=[
+                    "Due Date Sort",
+                    ALLOY_COMPATIBILITY_GROUP_COLUMN,
+                    "_Compat_All_Rank",
+                    Columns.COL_JOB_NUMBER,
+                    "Extension_Seq",
+                ],
+                ascending=[True, True, True, True, True],
+                na_position="last",
+            )
+            ordered_groups.append(urgent_rank_df)
 
-            if not urgent_df.empty:
-                urgent_df = urgent_df.sort_values(
-                    by=[
-                        "Due Date Sort",
-                        "_Compat_All_Rank",
-                        Columns.COL_JOB_NUMBER,
-                        "Extension_Seq",
-                    ],
-                    ascending=[True, True, True, True],
-                    na_position="last",
-                )
-                ordered_groups.append(urgent_df)
+        flexible_rank_df = rank_df[
+            pd.to_numeric(rank_df["Days Until Due"], errors="coerce") > HIGHEST_PRIORITY_WINDOW_DAYS
+        ].copy()
+        if flexible_rank_df.empty:
+            continue
 
-            if not flexible_df.empty:
+        flexible_rank_df["_DueBand"] = (
+            (pd.to_numeric(flexible_rank_df["Days Until Due"], errors="coerce") - (HIGHEST_PRIORITY_WINDOW_DAYS + 1))
+            // FLEXIBLE_DUE_BAND_DAYS
+        ).fillna(9999).astype(int)
+
+        for due_band in sorted(flexible_rank_df["_DueBand"].unique().tolist()):
+            band_df = flexible_rank_df[flexible_rank_df["_DueBand"] == due_band].copy()
+            for group in sorted(band_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str).unique().tolist()):
+                group_df = band_df[
+                    band_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str) == group
+                ].copy()
+                if group_df.empty:
+                    continue
                 ordered_groups.append(
                     _order_group_rows_for_heat_fill(
-                        flexible_df,
+                        group_df,
                         heat_weight_limit_lbs=heat_weight_limit_lbs,
                         heat_mold_limit=heat_mold_limit,
                     )
@@ -162,7 +174,7 @@ def order_rows_for_alloy_grouping(
         return ordered.drop(columns=["_Compat_All_Rank"]).reset_index(drop=True)
 
     ordered_result = pd.concat(ordered_groups, ignore_index=True)
-    ordered_result = ordered_result.drop(columns=["_Compat_All_Rank"], errors="ignore")
+    ordered_result = ordered_result.drop(columns=["_Compat_All_Rank", "_DueBand"], errors="ignore")
     return ordered_result.reset_index(drop=True)
 
 

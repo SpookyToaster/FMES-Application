@@ -45,6 +45,7 @@ class HeatScheduleMainTests(unittest.TestCase):
             schedule_result["pour_day_dates"],
             "heat_only.xlsx",
             mold_schedule_frame=schedule_result["mold_schedule_frame"],
+            mold_day_dates=schedule_result["mold_day_dates"],
         )
         export_mold_schedule.assert_not_called()
         self.assertEqual(result["heat_output_file"], "heat_only.xlsx")

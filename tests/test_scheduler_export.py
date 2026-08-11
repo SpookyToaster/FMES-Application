@@ -110,6 +110,15 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_jobs.cell(2, 1).value, "5001")
             self.assertEqual(ws_jobs.cell(2, 12).value, "YES")
 
+            ws_mgmt = wb["Mold Mgmt Summary"]
+            self.assertEqual(ws_mgmt.cell(1, 2).value, "Customer Name")
+            self.assertEqual(ws_mgmt.cell(1, 11).value, "Planner Diagnostic")
+
+            ws_dept = wb["Mold Dept Schedule"]
+            self.assertEqual(ws_dept.cell(1, 1).value, "Schedule Date")
+            self.assertEqual(ws_dept.cell(1, 3).value, "Job Number")
+            self.assertEqual(ws_dept.cell(1, 8).value, "Casting Type")
+
     def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
         schedule_data_frame = pd.DataFrame([
             {
@@ -484,6 +493,16 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_detail.cell(1, 5).value, "Global Heat #")
             self.assertEqual(ws_detail.cell(2, 4).value, 1)
             self.assertEqual(ws_detail.cell(2, 13).value, "5001")
+
+            ws_melt_mgmt = wb["Melt Mgmt Summary"]
+            self.assertEqual(ws_melt_mgmt.cell(1, 3).value, "Customer(s)")
+            self.assertEqual(ws_melt_mgmt.cell(1, 5).value, "Mold Date(s)")
+            self.assertEqual(ws_melt_mgmt.cell(1, 11).value, "Planner Diagnostic")
+
+            ws_melt_dept = wb["Melt Dept Schedule"]
+            self.assertEqual(ws_melt_dept.cell(1, 1).value, "Pour Date")
+            self.assertEqual(ws_melt_dept.cell(1, 6).value, "Job Number")
+            self.assertEqual(ws_melt_dept.cell(1, 9).value, "Customer Name")
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
         melt_schedule = {
