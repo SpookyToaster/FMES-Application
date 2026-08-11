@@ -5,9 +5,8 @@ Experimental orchestration pipeline for branch-level scheduling redesign:
     1. Read the Open Order Report from Excel.
     2. Filter jobs eligible for mold scheduling.
     3. Normalize jobs into scheduler rows.
-    4. Prioritize rows for review and scheduling by due date.
-    5. Stop at sorted/optimized alloy-group rows and seed export-facing data.
-    6. Keep Excel export formatting/report generation intact.
+    4. Seed export-facing data with no scheduling decisions.
+    5. Keep Excel export formatting/report generation intact.
 
 Import schedule_molds() from fmes.main or tests.
 """
@@ -22,10 +21,6 @@ from .config import Columns
 from .scheduler_build import (
     build_schedule_dates,
     build_schedule_rows,
-)
-from .melt_planning import (
-    PRIORITY_REVIEW_WINDOW_DAYS,
-    prioritize_schedule_rows,
 )
 
 from .scheduler_export import (
@@ -42,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def _build_seed_melt_schedule_from_sorted_groups(sorted_rows):
-    """Return a minimal melt schedule seeded directly from sorted alloy groups."""
+    """Return a minimal melt schedule seeded directly from normalized rows."""
     if sorted_rows is None or sorted_rows.empty:
         return {}
 
@@ -50,9 +45,9 @@ def _build_seed_melt_schedule_from_sorted_groups(sorted_rows):
     seed_rows["Pour Schedule Day"] = 1
 
     if "Heat #" not in seed_rows.columns:
-        seed_rows["Heat #"] = ""
+        seed_rows["Heat #"] = 1
     if "Global Heat #" not in seed_rows.columns:
-        seed_rows["Global Heat #"] = ""
+        seed_rows["Global Heat #"] = 1
 
     return {
         1: {
@@ -106,35 +101,10 @@ def schedule_molds():
         schedule_rows = build_schedule_rows(jobs_to_schedule)
         logger.info("      %s scheduler rows created.", len(schedule_rows))
 
-        schedule_data_frame = pd.DataFrame(schedule_rows)
-        schedule_data_frame = (
-            prioritize_schedule_rows(schedule_data_frame)
-        )
+        schedule_data_frame = pd.DataFrame(schedule_rows).copy()
 
-        if "Days Until Due" not in schedule_data_frame.columns:
-            due_dates = pd.to_datetime(
-                schedule_data_frame.get(Columns.COL_DUE_DATE, pd.Series(dtype="object")),
-                errors="coerce",
-            ).dt.normalize()
-            reference_date = pd.Timestamp.today().normalize()
-            schedule_data_frame["Days Until Due"] = (due_dates - reference_date).dt.days
-
-        # Keep planning horizon to the next 10 weeks so far-out jobs are not
-        # pulled in early just to fill mold capacity.
-        before_horizon_count = len(schedule_data_frame)
-        schedule_data_frame = schedule_data_frame[
-            schedule_data_frame["Days Until Due"].notna()
-            & (schedule_data_frame["Days Until Due"] <= PRIORITY_REVIEW_WINDOW_DAYS)
-        ].copy()
-        logger.info(
-            "      Planning horizon filter (<= %s days): %s -> %s rows.",
-            PRIORITY_REVIEW_WINDOW_DAYS,
-            before_horizon_count,
-            len(schedule_data_frame),
-        )
-
-        logger.info("      Experimental mode: stopping after sorted/optimized alloy groups.")
-        logger.info("      Seeding export data from prioritized rows (no melt assignment/backfill yet).")
+        logger.info("      Experimental mode: no legacy scheduling decisions are applied.")
+        logger.info("      Seeding export data from normalized rows.")
         melt_schedule = _build_seed_melt_schedule_from_sorted_groups(schedule_data_frame)
         mold_schedule_frame = pd.DataFrame()
         mold_days = []

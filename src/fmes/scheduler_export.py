@@ -669,6 +669,16 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
             if "Heat #" not in df.columns:
                 df["Heat #"] = ""
 
+            for required_col in [Columns.COL_ALLOY, Columns.COL_DUE_DATE, Columns.COL_JOB_NUMBER]:
+                if required_col not in df.columns:
+                    df[required_col] = ""
+
+            df = df.sort_values(
+                by=[Columns.COL_ALLOY, Columns.COL_DUE_DATE, Columns.COL_JOB_NUMBER],
+                ascending=[True, True, True],
+                na_position="last",
+            ).reset_index(drop=True)
+
             mold_day = Day_Dates[day]
 
             def _resolve_pour_day_value(row):
@@ -764,6 +774,19 @@ def print_export_blocks(export_blocks):
         raise RuntimeError("Failed while printing export blocks") from exc
 
 
+def _resolve_column_value(row, *candidates):
+    """Return the first populated value from a list of accepted field names."""
+    for candidate in candidates:
+        if candidate in row:
+            value = row.get(candidate)
+            if value is not None and not (isinstance(value, str) and value.strip() == ""):
+                return value
+    for candidate in candidates:
+        if candidate in row:
+            return row.get(candidate)
+    return ""
+
+
 def build_excel_rows(export_blocks):
     """
     Flatten export_blocks into a list of row lists for simple sequential writing.
@@ -783,7 +806,6 @@ def build_excel_rows(export_blocks):
         block = export_blocks[day]
         excel_rows.append(["Mold Schedule", block["date"].strftime("%m/%d/%Y"), block["weekday"]])
         excel_rows.append([
-            "Due Date",
             "Customer Name",
             "Part Number",
             "Job Number",
@@ -791,16 +813,13 @@ def build_excel_rows(export_blocks):
             "Alloy",
             "Mold Type",
             "Quantity of Molds",
-            "Castings Per Mold",
             "Cores Per Mold",
-            "Total Weight per EXT",
-            "# of Molds for EXT",
-            "Heat #",
+            "Total Weight",
+            "Number of Molds Today",
         ])
 
         for _, row in block["rows"].iterrows():
             excel_rows.append([
-                _normalize_due_date(row.get(Columns.COL_DUE_DATE, "")),
                 row.get("Customer Name", ""),
                 row.get("Part Number", ""),
                 row.get(Columns.COL_JOB_NUMBER, ""),
@@ -808,14 +827,12 @@ def build_excel_rows(export_blocks):
                 row.get(Columns.COL_ALLOY, ""),
                 row.get(Columns.COL_CAST_TYPE, ""),
                 row.get("Quantity of Molds", ""),
-                row.get("Castings Per Mold", ""),
                 row.get("Quantity of Cores", ""),
-                row.get("Total Weight per EXT", ""),
-                row.get("Molds for EXT", ""),
-                row.get("Heat #", ""),
+                _resolve_column_value(row, "Total Weight", "Total Weight per EXT"),
+                _resolve_column_value(row, "Number of Molds Today", "# of Molds Today", "Molds for EXT"),
             ])
 
-        excel_rows.append(["TOTALS", "", "", "", "", "", "", "", "", "", block["weight_total"], block["mold_total"], ""])
+        excel_rows.append(["TOTALS", "", "", "", "", "", "", "", block["weight_total"], block["mold_total"]])
         excel_rows.append([])
 
     return excel_rows
@@ -847,7 +864,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
             created_on,
             "Average Molds / Day",
             f"{avg_molds_per_day:,.1f}",
-            19,
+            10,
         )
 
         current_row = 5
@@ -863,7 +880,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
             ws.cell(current_row, 2, block["date"].strftime("%m/%d/%Y"))
             ws.cell(current_row, 4, block["weekday"])
 
-            for col in range(1, 20):
+            for col in range(1, 11):
                 ws.cell(current_row, col).font = bold
                 ws.cell(current_row, col).fill = day_title_fill
 
@@ -872,7 +889,6 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
             current_row += 2
 
             headers = [
-                "Due Date",
                 "Customer Name",
                 "Part Number",
                 "Job Number",
@@ -880,17 +896,9 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
                 "Alloy",
                 "Mold Type",
                 "Quantity of Molds",
-                "Castings Per Mold",
                 "Quantity of Cores",
-                "Total Weight per EXT",
-                "# of Molds for EXT",
-                "Heat #",
-                "Pour Day",
-                "Pour Date",
-                "Pour Weekday",
-                "Pour Buffer Days",
-                "Due Buffer Status",
-                "Planner Diagnostic",
+                "Total Weight",
+                "Number of Molds Today",
             ]
 
             for col_num, header in enumerate(headers, start=1):
@@ -904,7 +912,6 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
 
             for _, row in block["rows"].iterrows():
                 values = [
-                    _normalize_due_date(row.get(Columns.COL_DUE_DATE, "")),
                     row.get("Customer Name", ""),
                     row.get("Part Number", ""),
                     row.get(Columns.COL_JOB_NUMBER, ""),
@@ -912,56 +919,35 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
                     row.get(Columns.COL_ALLOY, ""),
                     row.get(Columns.COL_CAST_TYPE, ""),
                     row.get("Quantity of Molds", ""),
-                    row.get("Castings Per Mold", ""),
                     row.get("Quantity of Cores", ""),
-                    row.get("Total Weight per EXT", ""),
-                    row.get("Molds for EXT", ""),
-                    row.get("Heat #", ""),
-                    row.get("Pour Schedule Day", ""),
-                    _normalize_due_date(row.get("Pour Date", "")),
-                    row.get("Pour Weekday", ""),
-                    row.get("Pour Buffer Days", ""),
-                    row.get("Due Buffer Status", ""),
-                    row.get("Planner Diagnostic", ""),
+                    _resolve_column_value(row, "Total Weight", "Total Weight per EXT"),
+                    _resolve_column_value(row, "Number of Molds Today", "# of Molds Today", "Molds for EXT"),
                 ]
 
                 for col_num, value in enumerate(values, start=1):
                     cell = ws.cell(current_row, col_num, value)
                     cell.border = thin
                     cell.fill = REPORT_SEPARATOR_FILL
-                    if col_num in {1, 15} and value != "":
-                        cell.number_format = "m/d/yyyy"
-                    if col_num == 19:
-                        cell.alignment = Alignment(wrap_text=True, vertical="top")
 
                 current_row += 1
 
             ws.cell(current_row, 1, "TOTALS")
-            ws.cell(current_row, 11, block["weight_total"])
-            ws.cell(current_row, 12, block["mold_total"])
-            _apply_schedule_total_row(ws, current_row, [1, 11, 12])
+            ws.cell(current_row, 9, block["weight_total"])
+            ws.cell(current_row, 10, block["mold_total"])
+            _apply_schedule_total_row(ws, current_row, [1, 9, 10])
             current_row += 4
 
         widths = {
-            "A": 11,
-            "B": 22,
-            "C": 18,
-            "D": 12,
-            "E": 6,
-            "F": 10,
-            "G": 9,
+            "A": 20,
+            "B": 13,
+            "C": 11,
+            "D": 11,
+            "E": 10,
+            "F": 5,
+            "G": 10,
             "H": 10,
-            "I": 10,
-            "J": 10,
-            "K": 13,
-            "L": 11,
-            "M": 8,
-            "N": 8,
-            "O": 11,
-            "P": 10,
-            "Q": 8,
-            "R": 12,
-            "S": 34,
+            "I": 13,
+            "J": 11,
         }
 
         for col, width in widths.items():

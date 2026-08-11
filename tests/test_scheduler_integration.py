@@ -36,7 +36,6 @@ class SchedulerIntegrationTests(unittest.TestCase):
              patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
-             patch("fmes.scheduler.prioritize_schedule_rows", side_effect=lambda df: df.assign(**{"Days Until Due": 1})), \
              patch("fmes.scheduler.build_schedule_dates", return_value={1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}), \
              patch("fmes.scheduler.build_daily_export_blocks", return_value={}), \
              patch("fmes.scheduler.build_job_shipping_report_rows", return_value=[]), \
@@ -73,7 +72,6 @@ class SchedulerIntegrationTests(unittest.TestCase):
              patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
-             patch("fmes.scheduler.prioritize_schedule_rows", side_effect=lambda df: df.assign(**{"Days Until Due": 1})), \
              patch("fmes.scheduler.build_schedule_dates", return_value={1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}), \
              patch("fmes.scheduler.build_daily_export_blocks", return_value={}), \
              patch("fmes.scheduler.build_job_shipping_report_rows", return_value=[]), \
@@ -84,7 +82,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
         self.assertEqual(seeded_rows.iloc[0][Columns.COL_JOB_NUMBER], "9001")
         self.assertEqual(int(seeded_rows.iloc[0]["Pour Schedule Day"]), 1)
 
-    def test_schedule_molds_filters_to_ten_week_horizon_boundary(self):
+    def test_schedule_molds_keeps_all_normalized_rows_for_shipping_context(self):
         input_file = pd.DataFrame([
             {
                 Columns.COL_JOB_NUMBER: "9009",
@@ -149,12 +147,6 @@ class SchedulerIntegrationTests(unittest.TestCase):
              patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=schedule_rows_df), \
-             patch(
-                 "fmes.scheduler.prioritize_schedule_rows",
-                 side_effect=lambda df: df.assign(
-                     **{"Days Until Due": [70, 71], "Planning Priority": ["Priority Review", "Standard"]}
-                 ),
-             ), \
              patch("fmes.scheduler.build_schedule_dates", return_value={1: {"date": pd.Timestamp("2026-08-11"), "weekday": "Tuesday"}}), \
              patch("fmes.scheduler.build_daily_export_blocks", return_value={}), \
              patch("fmes.scheduler.build_job_shipping_report_rows", return_value=[]) as build_job_shipping_report_rows, \
@@ -162,7 +154,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
             scheduler.schedule_molds()
 
         filtered_df = build_job_shipping_report_rows.call_args.args[0]
-        self.assertEqual(filtered_df[Columns.COL_JOB_NUMBER].tolist(), ["9009"])
+        self.assertEqual(filtered_df[Columns.COL_JOB_NUMBER].tolist(), ["9009", "9010"])
 
     def test_schedule_molds_uses_one_calendar_for_mold_and_pour_days(self):
         input_file = pd.DataFrame([
@@ -192,7 +184,6 @@ class SchedulerIntegrationTests(unittest.TestCase):
              patch("fmes.scheduler.sync_open_order_report_with_sql", return_value={"row_count": 1, "backup_path": "b", "historical_oor_path": "h", "db_snapshot_path": "s"}), \
              patch("fmes.scheduler.mold_scheduler", return_value=input_file.iloc[[0]]), \
              patch("fmes.scheduler.build_schedule_rows", return_value=input_file.iloc[[0]].assign(**{"EXT": "", "Extension_Seq": 0, "Molds for EXT": 1, "Total Weight per EXT": 100})), \
-             patch("fmes.scheduler.prioritize_schedule_rows", side_effect=lambda df: df.assign(**{"Days Until Due": 1})), \
              patch("fmes.scheduler.build_schedule_dates", return_value=calendar) as build_schedule_dates, \
              patch("fmes.scheduler.build_daily_export_blocks", return_value={}), \
              patch("fmes.scheduler.build_job_shipping_report_rows", return_value=[]), \

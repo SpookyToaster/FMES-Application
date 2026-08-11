@@ -15,6 +15,46 @@ from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, b
 
 
 class SchedulerExportTests(unittest.TestCase):
+    def test_build_daily_export_blocks_sorts_rows_by_alloy(self):
+        frame = pd.DataFrame([
+            {
+                Columns.COL_DUE_DATE: "2026-08-05",
+                "Customer Name": "Customer B",
+                "Part Number": "P2",
+                Columns.COL_JOB_NUMBER: "5002",
+                "EXT": "",
+                Columns.COL_ALLOY: "B",
+                Columns.COL_CAST_TYPE: "L",
+                "Quantity of Molds": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Total Weight per EXT": 30,
+                "Molds for EXT": 1,
+            },
+            {
+                Columns.COL_DUE_DATE: "2026-08-04",
+                "Customer Name": "Customer A",
+                "Part Number": "P1",
+                Columns.COL_JOB_NUMBER: "5001",
+                "EXT": "",
+                Columns.COL_ALLOY: "A",
+                Columns.COL_CAST_TYPE: "L",
+                "Quantity of Molds": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Total Weight per EXT": 25,
+                "Molds for EXT": 1,
+            },
+        ])
+
+        blocks = build_daily_export_blocks(
+            {1: frame},
+            {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}},
+        )
+
+        ordered_alloys = blocks[1]["rows"][Columns.COL_ALLOY].tolist()
+        self.assertEqual(ordered_alloys, ["A", "B"])
+
     def test_build_export_blocks_and_excel_rows(self):
         frame = pd.DataFrame([
             {
@@ -42,7 +82,7 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(blocks[1]["weight_total"], 25)
         self.assertEqual(blocks[1]["mold_total"], 2)
         self.assertGreater(len(excel_rows), 0)
-        self.assertEqual(excel_rows[1][-1], "Heat #")
+        self.assertEqual(excel_rows[1][-1], "Number of Molds Today")
 
     def test_export_mold_schedule_writes_file(self):
         frame = pd.DataFrame([
@@ -120,17 +160,15 @@ class SchedulerExportTests(unittest.TestCase):
 
             wb = load_workbook(output_file)
             ws = wb["Mold Schedule"]
-            due_date_cell = ws.cell(8, 1)
-            self.assertIsInstance(due_date_cell.value, datetime)
-            self.assertEqual(due_date_cell.value.date().isoformat(), "2026-08-04")
-            self.assertEqual(due_date_cell.value.time().isoformat(), "00:00:00")
-            self.assertEqual(due_date_cell.number_format, "m/d/yyyy")
+            self.assertEqual(ws.cell(7, 1).value, "Customer Name")
+            self.assertEqual(ws.cell(7, 8).value, "Quantity of Cores")
+            self.assertEqual(ws.cell(7, 10).value, "Number of Molds Today")
+            self.assertEqual(ws.cell(8, 1).value, "Customer")
+            self.assertEqual(ws.cell(8, 10).value, 2)
             self.assertEqual(ws.cell(1, 1).value, "Mold Schedule")
             self.assertEqual(ws.cell(2, 1).value, "Date Created")
             self.assertEqual(ws.cell(2, 4).value, "Average Molds / Day")
             self.assertEqual(ws.cell(5, 1).value, "Mold Schedule")
-            self.assertEqual(ws.cell(7, 13).value, "Heat #")
-            self.assertEqual(ws.cell(8, 13).value, 1)
 
             ws_jobs = wb["Job Shipping Outlook"]
             self.assertEqual(ws_jobs.cell(1, 2).value, "Schedule Status")
@@ -153,13 +191,6 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_mgmt.cell(7, 2).value, "L=2/30")
             self.assertEqual(ws_mgmt.cell(7, 3).value, "F=0/3")
             self.assertEqual(ws_mgmt.cell(8, 1).value, "Day 2")
-
-            ws_dept = wb["Mold Dept Schedule"]
-            self.assertEqual(ws_dept.cell(1, 1).value, "Schedule Date")
-            self.assertEqual(ws_dept.cell(1, 3).value, "Job Number")
-            self.assertEqual(ws_dept.cell(1, 8).value, "Casting Type")
-            self.assertEqual(ws_dept.cell(3, 1).value, None)
-            self.assertEqual(ws_dept.cell(4, 1).value.date().isoformat(), "2026-08-05")
 
     def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
         schedule_data_frame = pd.DataFrame([
