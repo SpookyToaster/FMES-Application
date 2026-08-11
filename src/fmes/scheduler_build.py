@@ -22,7 +22,6 @@ from .melt_planning import HEAT_WEIGHT_LIMIT_LBS, MAX_PLANNED_HEATS_PER_DAY, ass
 
 EXTENSION_WEIGHT_LIMIT_LBS = 2300
 EXTENSION_MOLD_LIMIT = 10
-MAX_MOLD_SIT_DAYS = 3
 _EXTENSION_ALPHABET = [ch for ch in string.ascii_uppercase if ch != "L"]
 
 
@@ -409,10 +408,10 @@ def assign_mold_days_from_heat_plan(planned_rows):
     Back-fill molding days from an authoritative heat plan.
 
     Heats keep their planned grouping and order. Each heat's molds are placed
-    on the days immediately before its pour so molds never sit longer than
-    MAX_MOLD_SIT_DAYS days (unless a single heat physically needs more days).
-    When nearby mold capacity is full, the pour day is pushed later (planning
-    further ahead) instead of molding earlier.
+    on available days before its pour, back-scheduling as far as needed to
+    satisfy mold capacity constraints while preserving grouped heat pours.
+    When nearby mold capacity is full, the algorithm expands farther backward
+    before deciding to push a pour day later.
 
     Returns:
         tuple[pd.DataFrame, int]: allocated mold rows carrying the final
@@ -446,7 +445,7 @@ def assign_mold_days_from_heat_plan(planned_rows):
             ["Pour Schedule Day", "Heat #"], sort=True
         ):
             heat_rows = [row for _, row in heat_df.iterrows()]
-            window_days_count = max(MAX_MOLD_SIT_DAYS, _heat_minimum_mold_days(heat_rows))
+            minimum_days_needed = _heat_minimum_mold_days(heat_rows)
 
             pour_day = max(_safe_int(original_pour_day, default=1), last_pour_day, 2)
             placements = None
@@ -454,6 +453,9 @@ def assign_mold_days_from_heat_plan(planned_rows):
                 if pours_per_day.get(pour_day, 0) >= MAX_PLANNED_HEATS_PER_DAY:
                     pour_day += 1
                     continue
+
+                # Back-schedule molds using the full runway before pour day.
+                window_days_count = max(pour_day - 1, minimum_days_needed)
                 placements = _try_place_heat_molds(
                     heat_rows, pour_day, window_days_count, day_usage, job_usage
                 )

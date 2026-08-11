@@ -142,9 +142,14 @@ class MoldScheduleFromMeltTests(unittest.TestCase):
             ).all()
         )
 
-    def test_molds_are_made_before_pour_and_sit_at_most_three_days(self):
-        schedule_rows = pd.DataFrame([
+    def test_molds_are_made_before_pour_and_can_back_schedule_beyond_three_days(self):
+        planned_heat_rows = pd.DataFrame([
             {
+                "Pour Schedule Day": 10,
+                "Heat #": 1,
+                "Global Heat #": 1,
+                "Planning Priority Rank": 1,
+                "Due Date Sort": pd.Timestamp("2026-08-20"),
                 Columns.COL_JOB_NUMBER: "MS4001",
                 Columns.COL_ALLOY: "LEW15",
                 Columns.COL_CAST_TYPE: "L",
@@ -152,38 +157,10 @@ class MoldScheduleFromMeltTests(unittest.TestCase):
                 Columns.COL_DUE_DATE: "2026-08-20",
                 "EXT": "A",
                 "Extension_Seq": 0,
-                "Molds for EXT": 8,
-                "Total Weight per EXT": 800,
-            },
-            {
-                Columns.COL_JOB_NUMBER: "MS4002",
-                Columns.COL_ALLOY: "MN STEEL",
-                Columns.COL_CAST_TYPE: "L",
-                Columns.COL_POUR_WEIGHT: 200,
-                Columns.COL_DUE_DATE: "2026-08-21",
-                "EXT": "A",
-                "Extension_Seq": 0,
-                "Molds for EXT": 10,
-                "Total Weight per EXT": 2000,
-            },
-            {
-                Columns.COL_JOB_NUMBER: "MS4003",
-                Columns.COL_ALLOY: "WCB",
-                Columns.COL_CAST_TYPE: "F",
-                Columns.COL_POUR_WEIGHT: 350,
-                Columns.COL_DUE_DATE: "2026-08-22",
-                "EXT": "A",
-                "Extension_Seq": 0,
-                "Molds for EXT": 4,
-                "Total Weight per EXT": 1400,
+                "Molds for EXT": 40,
+                "Total Weight per EXT": 4000,
             },
         ])
-
-        melt_schedule = build_melt_schedule(schedule_rows)
-        planned_heat_rows = pd.concat(
-            [day_plan["rows"] for day_plan in melt_schedule.values()],
-            ignore_index=True,
-        )
 
         assigned_mold_rows, _ = assign_mold_days_from_heat_plan(planned_heat_rows)
 
@@ -197,10 +174,10 @@ class MoldScheduleFromMeltTests(unittest.TestCase):
             ).all()
         )
 
-        # Molds must not sit on the floor more than 3 days before pour.
+        # Back scheduling can now go farther than 3 days to preserve pour targets.
         sit_days = assigned_mold_rows["Pour Schedule Day"] - assigned_mold_rows["Schedule Day"]
         self.assertTrue((sit_days >= 1).all())
-        self.assertTrue((sit_days <= 3).all())
+        self.assertTrue((sit_days > 3).any())
 
     def test_lf_buckets_do_not_change_heat_grouping(self):
         schedule_rows = pd.DataFrame([
