@@ -36,6 +36,7 @@ class Paths:
     OUTPUT_DIR = SCHEDULE_ROOT / "Output"
     MOLD_SCHEDULE_OUTPUT = OUTPUT_DIR / "Mold Schedule.xlsx"
     HEAT_SUMMARY_OUTPUT = OUTPUT_DIR / "Heat Summary.xlsx"
+    COMBINED_SCHEDULE_OUTPUT = OUTPUT_DIR / "Production Schedule Summary.xlsx"
     LOG_DIR = SCHEDULE_ROOT / "Logs"
 
 

@@ -8,7 +8,10 @@ workbooks:
                           and row-level heat-plan detail.
 """
 
+from copy import copy
 from pathlib import Path
+import tempfile
+from datetime import datetime
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
@@ -104,6 +107,66 @@ def _insert_day_break_row(ws, row_num, column_count, fill=None, height=8):
         _apply_fill_to_row(ws, row_num, column_count, fill)
 
 
+REPORT_TITLE_FILL = PatternFill(fill_type="solid", start_color="1F4E78", end_color="1F4E78")
+REPORT_SUBTITLE_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_color="D9E2F3")
+REPORT_HEADER_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_color="D9E2F3")
+REPORT_TOTAL_FILL = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
+REPORT_SEPARATOR_FILL = PatternFill(fill_type="solid", start_color="FFFFFF", end_color="FFFFFF")
+
+
+def _write_schedule_banner(ws, title, created_on, metric_label, metric_value, last_column):
+    """Write a consistent top-of-sheet banner for schedule workbooks."""
+    title_font = Font(bold=True, color="FFFFFF", size=14)
+    label_font = Font(bold=True)
+    value_font = Font(bold=True)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    title_cell = ws.cell(1, 1, title)
+    title_cell.font = title_font
+    title_cell.fill = REPORT_TITLE_FILL
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    created_label = ws.cell(2, 1, "Date Created")
+    created_label.font = label_font
+    created_label.fill = REPORT_SUBTITLE_FILL
+    created_value = ws.cell(2, 2, created_on.strftime("%m/%d/%Y"))
+    created_value.font = value_font
+    created_value.fill = REPORT_SUBTITLE_FILL
+
+    metric_label_cell = ws.cell(2, 4, metric_label)
+    metric_label_cell.font = label_font
+    metric_label_cell.fill = REPORT_SUBTITLE_FILL
+    metric_value_cell = ws.cell(2, 5, metric_value)
+    metric_value_cell.font = value_font
+    metric_value_cell.fill = REPORT_SUBTITLE_FILL
+
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[3].height = 8
+
+
+def _apply_schedule_day_header(ws, row_num, column_count, fill=REPORT_HEADER_FILL):
+    """Apply consistent header styling to a day block header row."""
+    _apply_fill_to_row(ws, row_num, column_count, fill)
+    for col_num in range(1, column_count + 1):
+        cell = ws.cell(row_num, col_num)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def _apply_schedule_total_row(ws, row_num, columns):
+    """Apply consistent styling to a totals row."""
+    for col_num in columns:
+        ws.cell(row_num, col_num).fill = REPORT_TOTAL_FILL
+        ws.cell(row_num, col_num).font = Font(bold=True)
+
+
+def _apply_schedule_data_row(ws, row_num, column_count):
+    """Apply a consistent border/fill baseline to schedule data rows."""
+    for col_num in range(1, column_count + 1):
+        ws.cell(row_num, col_num).fill = REPORT_SEPARATOR_FILL
+
+
 def _build_mold_capacity_rows(export_blocks):
     """Summarize daily line/floor mold usage against configured day limits."""
     capacity_rows = []
@@ -176,6 +239,118 @@ def _write_capacity_block(ws, start_row, title, headers, rows, bold, thin):
         data_row += 1
 
     return data_row
+
+
+def _clone_sheet_to_workbook(source_ws, target_wb, target_title):
+    """Clone values, styles, and print layout from one workbook sheet to another."""
+    target_ws = target_wb.create_sheet(target_title)
+
+    for row in source_ws.iter_rows():
+        for cell in row:
+            target_cell = target_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+            if cell.font is not None:
+                target_cell.font = copy(cell.font)
+            if cell.fill is not None:
+                target_cell.fill = copy(cell.fill)
+            if cell.border is not None:
+                target_cell.border = copy(cell.border)
+            if cell.alignment is not None:
+                target_cell.alignment = copy(cell.alignment)
+            if cell.protection is not None:
+                target_cell.protection = copy(cell.protection)
+            if cell.number_format:
+                target_cell.number_format = cell.number_format
+            if cell.comment is not None:
+                target_cell.comment = copy(cell.comment)
+            if cell.hyperlink:
+                target_cell._hyperlink = copy(cell.hyperlink)
+
+    for key, dimension in source_ws.column_dimensions.items():
+        target_ws.column_dimensions[key].width = dimension.width
+        target_ws.column_dimensions[key].hidden = dimension.hidden
+
+    for key, dimension in source_ws.row_dimensions.items():
+        target_ws.row_dimensions[key].height = dimension.height
+        target_ws.row_dimensions[key].hidden = dimension.hidden
+
+    for merged_range in source_ws.merged_cells.ranges:
+        target_ws.merge_cells(str(merged_range))
+
+    target_ws.freeze_panes = source_ws.freeze_panes
+    target_ws.auto_filter.ref = source_ws.auto_filter.ref
+    target_ws.page_setup.orientation = source_ws.page_setup.orientation
+    target_ws.page_setup.paperSize = source_ws.page_setup.paperSize
+    target_ws.page_setup.fitToWidth = source_ws.page_setup.fitToWidth
+    target_ws.page_setup.fitToHeight = source_ws.page_setup.fitToHeight
+    target_ws.page_margins.left = source_ws.page_margins.left
+    target_ws.page_margins.right = source_ws.page_margins.right
+    target_ws.page_margins.top = source_ws.page_margins.top
+    target_ws.page_margins.bottom = source_ws.page_margins.bottom
+    target_ws.print_options.horizontalCentered = source_ws.print_options.horizontalCentered
+    target_ws.print_options.verticalCentered = source_ws.print_options.verticalCentered
+    target_ws.print_area = source_ws.print_area
+    target_ws.print_title_cols = source_ws.print_title_cols
+    target_ws.print_title_rows = source_ws.print_title_rows
+
+    return target_ws
+
+
+def export_combined_schedule_workbook(
+    export_blocks,
+    melt_schedule,
+    pour_day_dates,
+    output_file="Production Schedule Summary.xlsx",
+    job_shipping_rows=None,
+    mold_schedule_frame=None,
+    mold_day_dates=None,
+):
+    """Export one combined workbook with management summaries and department schedules."""
+    try:
+        _ensure_output_parent(output_file)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir_path = Path(temp_dir)
+            mold_path = temp_dir_path / "mold_tmp.xlsx"
+            heat_path = temp_dir_path / "heat_tmp.xlsx"
+
+            export_mold_schedule(
+                export_blocks,
+                str(mold_path),
+                job_shipping_rows=job_shipping_rows or [],
+            )
+            export_heat_summary(
+                melt_schedule,
+                pour_day_dates,
+                str(heat_path),
+                mold_schedule_frame=mold_schedule_frame,
+                mold_day_dates=mold_day_dates,
+            )
+
+            from openpyxl import load_workbook
+
+            source_mold_wb = load_workbook(str(mold_path))
+            source_heat_wb = load_workbook(str(heat_path))
+
+            combined_wb = Workbook()
+            combined_wb.remove(combined_wb.active)
+
+            sheet_plan = [
+                (source_mold_wb, "Overall Job Status", "Overall Summary"),
+                (source_heat_wb, "Melt Mgmt Summary", "Melt Summary"),
+                (source_mold_wb, "Mold Mgmt Summary", "Mold Summary"),
+                (source_heat_wb, "Melt Dept Schedule", "Melt Schedule"),
+                (source_mold_wb, "Mold Schedule", "Mold Schedule"),
+            ]
+
+            for source_wb, source_name, target_name in sheet_plan:
+                if source_name not in source_wb.sheetnames:
+                    raise RuntimeError(f"Missing expected sheet '{source_name}' while building combined workbook")
+                _clone_sheet_to_workbook(source_wb[source_name], combined_wb, target_name)
+
+            combined_wb.save(output_file)
+            print(f"Saved: {output_file}")
+    except Exception as exc:
+        raise RuntimeError(f"Failed while exporting combined schedule workbook to {output_file}") from exc
 
 
 def build_job_shipping_report_rows(
@@ -505,10 +680,24 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
         wb = Workbook()
         ws = wb.active
         ws.title = "Mold Schedule"
-        current_row = 1
+        created_on = datetime.now()
+        total_molds = sum(float(block.get("mold_total", 0) or 0) for block in Export_Blocks.values())
+        avg_molds_per_day = total_molds / max(len(Export_Blocks), 1)
+
+        _write_schedule_banner(
+            ws,
+            "Mold Schedule",
+            created_on,
+            "Average Molds / Day",
+            f"{avg_molds_per_day:,.1f}",
+            19,
+        )
+
+        current_row = 5
 
         thin = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
         bold = Font(bold=True)
+        day_title_fill = REPORT_HEADER_FILL
 
         for day in sorted(Export_Blocks.keys()):
             block = Export_Blocks[day]
@@ -519,6 +708,9 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
 
             for col in range(1, 20):
                 ws.cell(current_row, col).font = bold
+                ws.cell(current_row, col).fill = day_title_fill
+
+            ws.row_dimensions[current_row].height = 20
 
             current_row += 2
 
@@ -546,8 +738,10 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
 
             for col_num, header in enumerate(headers, start=1):
                 cell = ws.cell(current_row, col_num, header)
-                cell.font = bold
                 cell.border = thin
+                cell.font = bold
+
+            _apply_schedule_day_header(ws, current_row, len(headers))
 
             current_row += 1
 
@@ -577,6 +771,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
                 for col_num, value in enumerate(values, start=1):
                     cell = ws.cell(current_row, col_num, value)
                     cell.border = thin
+                    cell.fill = REPORT_SEPARATOR_FILL
                     if col_num in {1, 15} and value != "":
                         cell.number_format = "m/d/yyyy"
                     if col_num == 19:
@@ -587,10 +782,8 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
             ws.cell(current_row, 1, "TOTALS")
             ws.cell(current_row, 11, block["weight_total"])
             ws.cell(current_row, 12, block["mold_total"])
-            ws.cell(current_row, 1).font = bold
-            ws.cell(current_row, 11).font = bold
-            ws.cell(current_row, 12).font = bold
-            current_row += 3
+            _apply_schedule_total_row(ws, current_row, [1, 11, 12])
+            current_row += 4
 
         widths = {
             "A": 11,
@@ -724,6 +917,66 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
                 ws_jobs.column_dimensions[col].width = width
 
             _apply_11x17_portrait_layout(ws_jobs)
+
+            ws_job_status = wb.create_sheet("Overall Job Status")
+            job_status_headers = [
+                "Job Number",
+                "Customer Name",
+                "Expected Ship Date",
+                "Due Date",
+                "Ship Buffer Days",
+                "On-Time",
+                "Schedule Status",
+            ]
+
+            for col_num, header in enumerate(job_status_headers, start=1):
+                cell = ws_job_status.cell(1, col_num, header)
+                cell.font = bold
+                cell.border = thin
+
+            row_num = 2
+            for row in job_shipping_rows:
+                values = [
+                    row.get("Job Number", ""),
+                    row.get("Customer Name", ""),
+                    row.get("Expected Ship Date", ""),
+                    row.get("Due Date", ""),
+                    row.get("Ship Buffer Days", ""),
+                    row.get("On-Time", ""),
+                    row.get("Schedule Status", ""),
+                ]
+
+                for col_num, value in enumerate(values, start=1):
+                    cell = ws_job_status.cell(row_num, col_num, value)
+                    cell.border = thin
+                    if col_num in {3, 4} and value != "":
+                        cell.number_format = "m/d/yyyy"
+
+                on_time = str(row.get("On-Time", "") or "").strip().upper()
+                if on_time == "YES":
+                    ws_job_status.cell(row_num, 6).fill = fill_green
+                elif on_time == "NO":
+                    ws_job_status.cell(row_num, 6).fill = fill_red
+                elif on_time == "NOT SCHEDULED":
+                    ws_job_status.cell(row_num, 6).fill = fill_orange
+                else:
+                    ws_job_status.cell(row_num, 6).fill = fill_gray
+
+                row_num += 1
+
+            status_widths = {
+                "A": 12,
+                "B": 24,
+                "C": 14,
+                "D": 11,
+                "E": 14,
+                "F": 10,
+                "G": 18,
+            }
+            for col, width in status_widths.items():
+                ws_job_status.column_dimensions[col].width = width
+
+            _apply_letter_portrait_layout(ws_job_status)
 
         ws_mgmt = wb.create_sheet("Mold Mgmt Summary")
         mgmt_headers = [
@@ -1294,18 +1547,37 @@ def export_heat_summary(
             return fill_gray
 
         summary_rows = build_heat_summary_rows((melt_schedule, day_dates), mold_schedule_frame=mold_schedule_frame)
-        current_row = 1
-
+        total_poured_lbs = 0.0
+        day_count = 0
         summary_df = pd.DataFrame(summary_rows)
+        if not summary_df.empty:
+            grouped_for_totals = summary_df[summary_df["Heat Status"] != "Reserved"].groupby(["Schedule Date", "Weekday"], sort=True)
+            day_count = len(grouped_for_totals)
+            total_poured_lbs = float(summary_df[summary_df["Heat Status"] != "Reserved"]["Total Weight (lbs)"].sum())
+
+        avg_poured_lbs_per_day = total_poured_lbs / max(day_count, 1)
+
+        _write_schedule_banner(
+            ws,
+            "Heat Schedule",
+            datetime.now(),
+            "Average Poured Lbs / Day",
+            f"{avg_poured_lbs_per_day:,.1f}",
+            len(headers),
+        )
+
+        current_row = 5
+
         if not summary_df.empty:
             grouped = summary_df.groupby(["Schedule Date", "Weekday"], sort=True)
             for (schedule_date, weekday), day_df in grouped:
-                ws.cell(current_row, 1, "Melt Schedule")
+                ws.cell(current_row, 1, "Heat Schedule")
                 ws.cell(current_row, 2, schedule_date)
                 ws.cell(current_row, 4, weekday)
                 ws.cell(current_row, 2).number_format = "m/d/yyyy"
                 for col in range(1, len(headers) + 1):
                     ws.cell(current_row, col).font = bold
+                    ws.cell(current_row, col).fill = REPORT_HEADER_FILL
 
                 current_row += 2
 
@@ -1313,6 +1585,8 @@ def export_heat_summary(
                     cell = ws.cell(current_row, col_num, header)
                     cell.font = bold
                     cell.border = thin
+
+                _apply_schedule_day_header(ws, current_row, len(headers))
 
                 current_row += 1
 
@@ -1348,6 +1622,7 @@ def export_heat_summary(
                     for col_num, value in enumerate(values, start=1):
                         cell = ws.cell(current_row, col_num, value)
                         cell.border = thin
+                        cell.fill = REPORT_SEPARATOR_FILL
                         if col_num in {1, 10, 11, 12} and value != "":
                             cell.number_format = "m/d/yyyy"
                         if col_num == 15:
@@ -1364,10 +1639,8 @@ def export_heat_summary(
                 ws.cell(current_row, 1, "TOTALS")
                 ws.cell(current_row, 15, float(day_df["Total Weight (lbs)"].sum()))
                 ws.cell(current_row, 16, float(day_df["Total Molds"].sum()))
-                ws.cell(current_row, 1).font = bold
-                ws.cell(current_row, 15).font = bold
-                ws.cell(current_row, 16).font = bold
-                current_row += 3
+                _apply_schedule_total_row(ws, current_row, [1, 15, 16])
+                current_row += 4
 
         widths = {
             "A": 11,
@@ -1715,6 +1988,8 @@ def export_heat_summary(
         heat_fill_a = PatternFill(fill_type="solid", start_color="EAF2F8", end_color="EAF2F8")
         heat_fill_b = PatternFill(fill_type="solid", start_color="FDF2E9", end_color="FDF2E9")
         melt_day_break_fill = PatternFill(fill_type="solid", start_color="D9EAD3", end_color="D9EAD3")
+        active_fill = heat_fill_a
+        last_heat_number = object()
         for day in sorted(melt_schedule.keys()):
             day_rows = melt_schedule[day].get("rows", pd.DataFrame()).copy()
             if day_rows.empty:
@@ -1726,7 +2001,6 @@ def export_heat_summary(
 
             pour_date = day_dates.get(day, {}).get("date", pd.NaT)
             weekday = day_dates.get(day, {}).get("weekday", "")
-            active_fill = heat_fill_a
             last_heat_number = object()
             for _, planned_row in day_rows.iterrows():
                 heat_number = planned_row.get("Heat #", "")

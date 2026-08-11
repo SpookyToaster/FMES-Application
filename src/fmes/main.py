@@ -17,12 +17,12 @@ from datetime import datetime
 from .config import Paths
 from .database import validate_database_environment
 from .scheduler import schedule_molds
-from .scheduler_export import export_heat_summary, export_mold_schedule
+from .scheduler_export import export_combined_schedule_workbook, export_heat_summary
 
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MOLD_OUTPUT = str(Paths.MOLD_SCHEDULE_OUTPUT)
+DEFAULT_MOLD_OUTPUT = str(Paths.COMBINED_SCHEDULE_OUTPUT)
 
 DEFAULT_HEAT_OUTPUT = str(Paths.HEAT_SUMMARY_OUTPUT)
 
@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument(
         "--output-file",
         default=DEFAULT_MOLD_OUTPUT,
-        help="Output path for Mold Schedule workbook.",
+        help="Output path for combined schedule workbook.",
     )
     parser.add_argument(
         "--heat-output-file",
@@ -107,10 +107,10 @@ def parse_heat_args():
 
 def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     """
-    Execute full scheduler run and export workbooks.
+    Execute full scheduler run and export one combined workbook.
 
     Returns:
-        dict with output file paths and number of day blocks exported.
+        dict with combined output file path and number of day blocks exported.
     """
     schedule_source = _resolve_schedule_source()
 
@@ -129,27 +129,23 @@ def run(output_file=DEFAULT_MOLD_OUTPUT, heat_output_file=DEFAULT_HEAT_OUTPUT):
     schedule_result = schedule_molds()
     export_blocks = schedule_result["export_blocks"]
 
-    logger.info("[3/4] Writing Mold Schedule workbook...")
-    export_mold_schedule(
+    logger.info("[3/4] Building combined workbook data...")
+    logger.info("[4/4] Writing Combined Schedule workbook...")
+    export_combined_schedule_workbook(
         export_blocks,
-        output_file,
-        job_shipping_rows=schedule_result.get("job_shipping_rows", []),
-    )
-    logger.info("      Saved: %s", output_file)
-
-    logger.info("[4/4] Writing Heat Summary workbook...")
-    export_heat_summary(
         schedule_result["melt_schedule"],
         schedule_result["pour_day_dates"],
-        heat_output_file,
+        output_file,
+        job_shipping_rows=schedule_result.get("job_shipping_rows", []),
         mold_schedule_frame=schedule_result.get("mold_schedule_frame", None),
         mold_day_dates=schedule_result.get("mold_day_dates", None),
     )
     logger.info("      Saved: %s", heat_output_file)
 
     return {
+        "combined_output_file": output_file,
         "mold_output_file": output_file,
-        "heat_output_file": heat_output_file,
+        "heat_output_file": output_file,
         "day_block_count": len(export_blocks),
     }
 
@@ -222,8 +218,7 @@ def main():
 
         logger.info("=" * 60)
         logger.info("Scheduler run complete.")
-        logger.info("Mold schedule: %s", result["mold_output_file"])
-        logger.info("Heat summary: %s", result["heat_output_file"])
+        logger.info("Combined schedule workbook: %s", result["combined_output_file"])
         logger.info("Production days scheduled: %s", result["day_block_count"])
         logger.info("=" * 60)
     except Exception:

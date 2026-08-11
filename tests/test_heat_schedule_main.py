@@ -35,8 +35,7 @@ class HeatScheduleMainTests(unittest.TestCase):
         with patch.dict("os.environ", {"SCHEDULER_INPUT_SOURCE": "sql"}, clear=False), \
              patch("fmes.main.validate_database_environment") as validate_database_environment, \
              patch("fmes.main.schedule_molds", return_value=schedule_result), \
-             patch("fmes.main.export_heat_summary") as export_heat_summary, \
-             patch("fmes.main.export_mold_schedule") as export_mold_schedule:
+               patch("fmes.main.export_heat_summary") as export_heat_summary:
             result = main.run_heat_schedule("heat_only.xlsx")
 
         validate_database_environment.assert_called_once_with()
@@ -47,7 +46,6 @@ class HeatScheduleMainTests(unittest.TestCase):
             mold_schedule_frame=schedule_result["mold_schedule_frame"],
             mold_day_dates=schedule_result["mold_day_dates"],
         )
-        export_mold_schedule.assert_not_called()
         self.assertEqual(result["heat_output_file"], "heat_only.xlsx")
         self.assertEqual(result["day_block_count"], 1)
 
