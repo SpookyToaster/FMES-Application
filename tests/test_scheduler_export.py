@@ -70,6 +70,29 @@ class SchedulerExportTests(unittest.TestCase):
                 "rows": frame,
                 "weight_total": 25,
                 "mold_total": 2,
+            },
+            2: {
+                "date": pd.Timestamp("2026-08-05"),
+                "weekday": "Wednesday",
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-05 00:00:00",
+                        "Customer Name": "Customer Two",
+                        "Part Number": "P2",
+                        Columns.COL_JOB_NUMBER: "5002",
+                        "EXT": "B",
+                        Columns.COL_ALLOY: "B",
+                        Columns.COL_CAST_TYPE: "N",
+                        "Quantity of Molds": 1,
+                        "Castings Per Mold": 1,
+                        "Quantity of Cores": 0,
+                        "Total Weight per EXT": 30,
+                        "Molds for EXT": 1,
+                        "Heat #": 2,
+                    }
+                ]),
+                "weight_total": 30,
+                "mold_total": 1,
             }
         }
 
@@ -113,11 +136,18 @@ class SchedulerExportTests(unittest.TestCase):
             ws_mgmt = wb["Mold Mgmt Summary"]
             self.assertEqual(ws_mgmt.cell(1, 2).value, "Customer Name")
             self.assertEqual(ws_mgmt.cell(1, 11).value, "Planner Diagnostic")
+            self.assertEqual(ws_mgmt.cell(5, 1).value, "Daily Mold Capacity")
+            self.assertEqual(ws_mgmt.cell(7, 1).value, "Day 1")
+            self.assertEqual(ws_mgmt.cell(7, 2).value, "L=2/30")
+            self.assertEqual(ws_mgmt.cell(7, 3).value, "F=0/3")
+            self.assertEqual(ws_mgmt.cell(8, 1).value, "Day 2")
 
             ws_dept = wb["Mold Dept Schedule"]
             self.assertEqual(ws_dept.cell(1, 1).value, "Schedule Date")
             self.assertEqual(ws_dept.cell(1, 3).value, "Job Number")
             self.assertEqual(ws_dept.cell(1, 8).value, "Casting Type")
+            self.assertEqual(ws_dept.cell(3, 1).value, None)
+            self.assertEqual(ws_dept.cell(4, 1).value.date().isoformat(), "2026-08-05")
 
     def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
         schedule_data_frame = pd.DataFrame([
@@ -423,22 +453,63 @@ class SchedulerExportTests(unittest.TestCase):
                 "rows": pd.DataFrame([
                     {
                         Columns.COL_DUE_DATE: "2026-08-04",
+                        "Customer Name": "Customer One",
+                        Columns.COL_ALLOY: "LEW15",
                         Columns.COL_JOB_NUMBER: "5001",
                         "EXT": "A",
                         "Molds for EXT": 2,
+                        "Total Weight per EXT": 600,
                         "Heat #": 1,
                     },
                     {
                         Columns.COL_DUE_DATE: "2026-08-04",
+                        "Customer Name": "Customer Two",
+                        Columns.COL_ALLOY: "LEW15",
                         Columns.COL_JOB_NUMBER: "5002",
                         "EXT": "B",
                         "Molds for EXT": 1,
+                        "Total Weight per EXT": 400,
                         "Heat #": 2,
                     },
                 ]),
+            },
+            2: {
+                "heat_summary": pd.DataFrame([
+                    {
+                        "Heat Slot": 1,
+                        "Heat #": 3,
+                        "Heat Status": "Planned",
+                        "Planning Priority": "Highest Priority",
+                        "Review Window": "Next 2 Weeks",
+                        "Anchor Alloy": "LEW20",
+                        "Compatibility Group": "A217",
+                        "Earliest Due Date": pd.Timestamp("2026-08-05").date(),
+                        "Latest Due Date": pd.Timestamp("2026-08-05").date(),
+                        "Total Weight (lbs)": 500,
+                        "Total Molds": 1,
+                        "Rows in Heat": 1,
+                        "Jobs": "5003",
+                        "Extensions": "5003-C",
+                    }
+                ]),
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-05",
+                        "Customer Name": "Customer Three",
+                        Columns.COL_ALLOY: "LEW20",
+                        Columns.COL_JOB_NUMBER: "5003",
+                        "EXT": "C",
+                        "Molds for EXT": 1,
+                        "Total Weight per EXT": 500,
+                        "Heat #": 3,
+                    }
+                ]),
             }
         }
-        day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+        day_dates = {
+            1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"},
+            2: {"date": pd.Timestamp("2026-08-05"), "weekday": "Wednesday"},
+        }
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_file = Path(temp_dir) / "heat_summary.xlsx"
@@ -446,6 +517,10 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertTrue(output_file.exists())
 
             wb = load_workbook(output_file)
+            self.assertEqual(
+                wb.sheetnames,
+                ["Heat Summary", "Heat Planner", "Melt Mgmt Summary", "Melt Dept Schedule"],
+            )
             ws = wb["Heat Summary"]
             self.assertEqual(ws.cell(1, 1).value, "Melt Schedule")
             self.assertEqual(ws.cell(3, 1).value, "Schedule Date")
@@ -464,19 +539,6 @@ class SchedulerExportTests(unittest.TestCase):
                 "5001-A | Due 08/04/2026 | Molds 2",
             )
 
-            ws_daily = wb["Daily Heat Totals"]
-            self.assertEqual(ws_daily.cell(1, 1).value, "Schedule Date")
-            self.assertEqual(ws_daily.cell(1, 3).value, "Total Heats")
-            self.assertEqual(ws_daily.cell(2, 3).value, 2)
-            self.assertEqual(ws_daily.cell(2, 4).value, 1)
-            self.assertEqual(ws_daily.cell(2, 5).value, 1)
-            self.assertEqual(ws_daily.cell(2, 6).value, 2)
-            self.assertEqual(ws_daily.cell(2, 7).value, 1000)
-
-            ws_compliance = wb["Due Buffer Compliance"]
-            self.assertEqual(ws_compliance.cell(1, 8).value, "Due Buffer Status")
-            self.assertEqual(ws_compliance.cell(2, 8).value, "AT RISK")
-
             ws_planner = wb["Heat Planner"]
             self.assertEqual(ws_planner.cell(1, 19).value, "Max Mold Lead Days")
             self.assertEqual(ws_planner.cell(1, 20).value, "Avg Mold Lead Days")
@@ -488,21 +550,35 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_planner.cell(4, 3).value, 6)
             self.assertEqual(ws_planner.cell(4, 24).value, None)
 
-            ws_detail = wb["Detailed Plan Rows"]
-            self.assertEqual(ws_detail.cell(1, 1).value, "Schedule Date")
-            self.assertEqual(ws_detail.cell(1, 5).value, "Global Heat #")
-            self.assertEqual(ws_detail.cell(2, 4).value, 1)
-            self.assertEqual(ws_detail.cell(2, 13).value, "5001")
-
             ws_melt_mgmt = wb["Melt Mgmt Summary"]
             self.assertEqual(ws_melt_mgmt.cell(1, 3).value, "Customer(s)")
-            self.assertEqual(ws_melt_mgmt.cell(1, 5).value, "Mold Date(s)")
-            self.assertEqual(ws_melt_mgmt.cell(1, 11).value, "Planner Diagnostic")
+            self.assertEqual(ws_melt_mgmt.cell(1, 4).value, "Poured Job IDs")
+            self.assertEqual(ws_melt_mgmt.cell(1, 6).value, "Mold Date(s)")
+            self.assertEqual(ws_melt_mgmt.cell(1, 12).value, "Planner Diagnostic")
+            self.assertEqual(ws_melt_mgmt.cell(2, 4).value, "5001")
+            self.assertEqual(ws_melt_mgmt.cell(7, 1).value, "Daily Melt Capacity")
+            self.assertEqual(ws_melt_mgmt.cell(9, 1).value, "Day 1")
+            self.assertEqual(ws_melt_mgmt.cell(9, 2).value, "Heats=2/5")
+            self.assertEqual(ws_melt_mgmt.cell(9, 3).value, "Lbs=1000/10000")
+            self.assertEqual(ws_melt_mgmt.cell(10, 1).value, "Day 2")
+            self.assertEqual(ws_melt_mgmt.cell(10, 2).value, "Heats=1/5")
+            self.assertEqual(ws_melt_mgmt.cell(10, 3).value, "Lbs=500/10000")
 
             ws_melt_dept = wb["Melt Dept Schedule"]
             self.assertEqual(ws_melt_dept.cell(1, 1).value, "Pour Date")
-            self.assertEqual(ws_melt_dept.cell(1, 6).value, "Job Number")
+            self.assertEqual(ws_melt_dept.cell(1, 5).value, "Job Number")
+            self.assertEqual(ws_melt_dept.cell(1, 8).value, "Job lbs")
             self.assertEqual(ws_melt_dept.cell(1, 9).value, "Customer Name")
+            self.assertEqual(ws_melt_dept.cell(2, 8).value, 600)
+            self.assertEqual(ws_melt_dept.cell(2, 3).alignment.horizontal, "center")
+            self.assertEqual(ws_melt_dept.cell(2, 6).alignment.horizontal, "center")
+            self.assertEqual(ws_melt_dept.cell(2, 7).alignment.horizontal, "center")
+            self.assertEqual(ws_melt_dept.cell(4, 1).value, None)
+            self.assertEqual(ws_melt_dept.cell(5, 1).value.date().isoformat(), "2026-08-05")
+            self.assertNotEqual(
+                ws_melt_dept.cell(2, 1).fill.start_color.rgb,
+                ws_melt_dept.cell(3, 1).fill.start_color.rgb,
+            )
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
         melt_schedule = {
