@@ -130,7 +130,7 @@ class SchedulerBuildTests(unittest.TestCase):
 
         self.assertEqual(day_offset, 0)
         self.assertEqual([int(v) for v in assigned["Schedule Day"].tolist()], [1, 2])
-        self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [2, 6])
+        self.assertEqual([int(v) for v in assigned["Molds for EXT"].tolist()], [6, 2])
         # Capacity could not fit all molds in one prior day, so the pour moved later.
         self.assertEqual([int(v) for v in assigned["Pour Schedule Day"].unique().tolist()], [3])
         self.assertEqual([int(v) for v in assigned["Original Pour Schedule Day"].unique().tolist()], [1])

@@ -381,8 +381,8 @@ def _try_place_heat_molds(heat_rows, pour_day, window_days_count, day_usage, job
             else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
         )
 
-        # Fill the latest days first to minimize how long molds sit before pour.
-        for day in reversed(window_days):
+        # Fill earliest available mold days first to preserve extension chronology.
+        for day in window_days:
             if molds_remaining <= 0:
                 break
             job_buckets = temp_job[day].setdefault(job_num, {"L": 0, "F": 0})

@@ -12,6 +12,82 @@ from fmes.scheduler_build import assign_mold_days_from_heat_plan
 
 
 class MoldScheduleFromMeltTests(unittest.TestCase):
+    def test_backfilled_mold_schedule_keeps_extension_chronology_by_day(self):
+        planned_heat_rows = pd.DataFrame([
+            {
+                "Pour Schedule Day": 5,
+                "Heat #": 1,
+                "Global Heat #": 1,
+                "Planning Priority Rank": 1,
+                "Due Date Sort": pd.Timestamp("2026-08-20"),
+                Columns.COL_JOB_NUMBER: "WTIN",
+                Columns.COL_ALLOY: "CA15 W",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 597.45,
+                Columns.COL_DUE_DATE: "2026-09-04",
+                "EXT": "A",
+                "Extension_Seq": 0,
+                "Molds for EXT": 3,
+                "Total Weight per EXT": 1792.35,
+            },
+            {
+                "Pour Schedule Day": 5,
+                "Heat #": 2,
+                "Global Heat #": 2,
+                "Planning Priority Rank": 1,
+                "Due Date Sort": pd.Timestamp("2026-08-20"),
+                Columns.COL_JOB_NUMBER: "WTIN",
+                Columns.COL_ALLOY: "CA15 W",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 597.45,
+                Columns.COL_DUE_DATE: "2026-09-04",
+                "EXT": "B",
+                "Extension_Seq": 1,
+                "Molds for EXT": 3,
+                "Total Weight per EXT": 1792.35,
+            },
+            {
+                "Pour Schedule Day": 5,
+                "Heat #": 3,
+                "Global Heat #": 3,
+                "Planning Priority Rank": 1,
+                "Due Date Sort": pd.Timestamp("2026-08-20"),
+                Columns.COL_JOB_NUMBER: "WTIN",
+                Columns.COL_ALLOY: "CA15 W",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 597.45,
+                Columns.COL_DUE_DATE: "2026-09-04",
+                "EXT": "C",
+                "Extension_Seq": 2,
+                "Molds for EXT": 3,
+                "Total Weight per EXT": 1792.35,
+            },
+            {
+                "Pour Schedule Day": 5,
+                "Heat #": 4,
+                "Global Heat #": 4,
+                "Planning Priority Rank": 1,
+                "Due Date Sort": pd.Timestamp("2026-08-20"),
+                Columns.COL_JOB_NUMBER: "WTIN",
+                Columns.COL_ALLOY: "CA15 W",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_POUR_WEIGHT: 597.45,
+                Columns.COL_DUE_DATE: "2026-09-04",
+                "EXT": "L",
+                "Extension_Seq": 3,
+                "Molds for EXT": 3,
+                "Total Weight per EXT": 1792.35,
+            },
+        ])
+
+        assigned_mold_rows, _ = assign_mold_days_from_heat_plan(planned_heat_rows)
+        self.assertFalse(assigned_mold_rows.empty)
+
+        wtin_rows = assigned_mold_rows[assigned_mold_rows[Columns.COL_JOB_NUMBER] == "WTIN"].copy()
+        wtin_rows = wtin_rows.sort_values(by=["Schedule Day", "Extension_Seq"], ascending=[True, True])
+
+        self.assertEqual(wtin_rows["EXT"].tolist(), ["A", "B", "C", "L"])
+
     def test_backfilled_mold_schedule_preserves_melt_plan_mold_totals(self):
         schedule_rows = pd.DataFrame([
             {
