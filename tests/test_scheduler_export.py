@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.config import Columns
-from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, build_heat_daily_totals_rows, build_heat_planner_rows, build_heat_summary_rows, build_job_shipping_report_rows, export_heat_summary, export_mold_schedule
+from fmes.scheduler_export import build_daily_export_blocks, build_excel_rows, build_heat_daily_totals_rows, build_heat_detail_rows, build_heat_planner_rows, build_heat_summary_rows, build_job_shipping_report_rows, export_heat_summary, export_mold_schedule
 
 
 class SchedulerExportTests(unittest.TestCase):
@@ -304,6 +304,38 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(planner_rows[0]["Manual Alloy"], "")
         self.assertEqual(planner_rows[0]["Planner Notes"], "")
 
+    def test_build_heat_detail_rows_flattens_planned_rows(self):
+        melt_schedule = {
+            1: {
+                "rows": pd.DataFrame([
+                    {
+                        "Pour Schedule Day": 1,
+                        "Heat #": 1,
+                        "Global Heat #": 7,
+                        "Planning Priority": "Highest Priority",
+                        "Review Window": "Next 2 Weeks",
+                        "Days Until Due": 3,
+                        Columns.COL_DUE_DATE: "2026-08-07",
+                        "Compatibility Group": "A216",
+                        Columns.COL_ALLOY: "WCB",
+                        Columns.COL_JOB_NUMBER: "7001",
+                        "EXT": "A",
+                        "Extension_Seq": 0,
+                        "Molds for EXT": 2,
+                        "Total Weight per EXT": 600,
+                    }
+                ])
+            }
+        }
+        day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+
+        detail_rows = build_heat_detail_rows(melt_schedule, day_dates)
+        self.assertEqual(len(detail_rows), 1)
+        self.assertEqual(detail_rows[0]["Heat #"], 1)
+        self.assertEqual(detail_rows[0]["Global Heat #"], 7)
+        self.assertEqual(detail_rows[0]["Job Number"], "7001")
+        self.assertEqual(detail_rows[0]["Due Buffer Days"], 3)
+
     def test_export_heat_summary_writes_file(self):
         melt_schedule = {
             1: {
@@ -412,6 +444,12 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_planner.cell(1, 20).value, "Manual Alloy")
             self.assertEqual(ws_planner.cell(4, 3).value, 6)
             self.assertEqual(ws_planner.cell(4, 20).value, None)
+
+            ws_detail = wb["Detailed Plan Rows"]
+            self.assertEqual(ws_detail.cell(1, 1).value, "Schedule Date")
+            self.assertEqual(ws_detail.cell(1, 5).value, "Global Heat #")
+            self.assertEqual(ws_detail.cell(2, 4).value, 1)
+            self.assertEqual(ws_detail.cell(2, 13).value, "5001")
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
         melt_schedule = {

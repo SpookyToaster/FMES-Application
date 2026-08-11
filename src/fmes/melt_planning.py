@@ -16,6 +16,7 @@ RESERVED_HEAT_SLOT_COUNT = 1
 MAX_TOTAL_HEAT_SLOTS_PER_DAY = MAX_PLANNED_HEATS_PER_DAY + RESERVED_HEAT_SLOT_COUNT
 HEAT_WEIGHT_LIMIT_LBS = 2300
 HEAT_MOLD_LIMIT = 10
+DAILY_WEIGHT_TARGET_LBS = 10000
 HIGHEST_PRIORITY_WINDOW_DAYS = 14
 PRIORITY_REVIEW_WINDOW_DAYS = 70
 
@@ -91,7 +92,11 @@ def prioritize_schedule_rows(schedule_df, reference_date=None):
     return prioritized
 
 
-def order_rows_for_alloy_grouping(schedule_df):
+def order_rows_for_alloy_grouping(
+    schedule_df,
+    heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS,
+    heat_mold_limit=HEAT_MOLD_LIMIT,
+):
     """Order prioritized rows to maximize batching within alloy compatibility groups."""
     if schedule_df.empty:
         return schedule_df.copy()
@@ -105,6 +110,9 @@ def order_rows_for_alloy_grouping(schedule_df):
     if "Extension_Seq" not in ordered.columns:
         ordered["Extension_Seq"] = 0
 
+    if "Days Until Due" not in ordered.columns:
+        ordered["Days Until Due"] = None
+
     ordered["_Compat_All_Rank"] = (
         ordered[ALLOY_COMPATIBILITY_MATCH_ALL_COLUMN]
         .astype(str)
@@ -113,21 +121,163 @@ def order_rows_for_alloy_grouping(schedule_df):
         .apply(lambda value: 0 if value == "YES" else 1)
     )
 
-    ordered = ordered.sort_values(
-        by=[
-            "Planning Priority Rank",
-            ALLOY_COMPATIBILITY_GROUP_COLUMN,
-            "_Compat_All_Rank",
-            Columns.COL_ALLOY,
-            "Due Date Sort",
-            Columns.COL_JOB_NUMBER,
-            "Extension_Seq",
-        ],
-        ascending=[True, True, True, True, True, True, True],
-        na_position="last",
-    ).reset_index(drop=True)
+    ordered_groups = []
+    rank_values = sorted(ordered["Planning Priority Rank"].dropna().unique().tolist())
+    for rank in rank_values:
+        rank_df = ordered[ordered["Planning Priority Rank"] == rank].copy()
+        for group in sorted(rank_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str).unique().tolist()):
+            group_df = rank_df[
+                rank_df[ALLOY_COMPATIBILITY_GROUP_COLUMN].fillna("").astype(str) == group
+            ].copy()
+            urgent_df = group_df[
+                pd.to_numeric(group_df["Days Until Due"], errors="coerce") <= HIGHEST_PRIORITY_WINDOW_DAYS
+            ].copy()
+            flexible_df = group_df[
+                pd.to_numeric(group_df["Days Until Due"], errors="coerce") > HIGHEST_PRIORITY_WINDOW_DAYS
+            ].copy()
 
-    return ordered.drop(columns=["_Compat_All_Rank"])
+            if not urgent_df.empty:
+                urgent_df = urgent_df.sort_values(
+                    by=[
+                        "Due Date Sort",
+                        "_Compat_All_Rank",
+                        Columns.COL_JOB_NUMBER,
+                        "Extension_Seq",
+                    ],
+                    ascending=[True, True, True, True],
+                    na_position="last",
+                )
+                ordered_groups.append(urgent_df)
+
+            if not flexible_df.empty:
+                ordered_groups.append(
+                    _order_group_rows_for_heat_fill(
+                        flexible_df,
+                        heat_weight_limit_lbs=heat_weight_limit_lbs,
+                        heat_mold_limit=heat_mold_limit,
+                    )
+                )
+
+    if not ordered_groups:
+        return ordered.drop(columns=["_Compat_All_Rank"]).reset_index(drop=True)
+
+    ordered_result = pd.concat(ordered_groups, ignore_index=True)
+    ordered_result = ordered_result.drop(columns=["_Compat_All_Rank"], errors="ignore")
+    return ordered_result.reset_index(drop=True)
+
+
+def _row_weight_and_molds(row):
+    """Return cleaned weight/mold values for a schedule row."""
+    row_weight = float(row.get("Total Weight per EXT", 0) or 0)
+    row_weight = max(row_weight, 0)
+    row_molds = int(pd.to_numeric(row.get("Molds for EXT", 0), errors="coerce") or 0)
+    row_molds = max(row_molds, 0)
+    return row_weight, row_molds
+
+
+def _best_fit_candidate(
+    anchor_alloy,
+    remaining,
+    current_weight,
+    current_molds,
+    heat_weight_limit_lbs,
+    heat_mold_limit,
+):
+    """Select the next best row for a heat using weighted best-fit scoring."""
+    best_key = None
+    best_score = None
+
+    for candidate_key, candidate in remaining.items():
+        row = candidate["row"]
+        row_weight = candidate["weight"]
+        row_molds = candidate["molds"]
+        alloy = candidate["alloy"]
+
+        if not can_alloy_share_heat_with(anchor_alloy, alloy, compatibility_map=candidate["compatibility_map"]):
+            continue
+
+        if current_weight > 0 and current_weight + row_weight > heat_weight_limit_lbs:
+            continue
+        if current_molds > 0 and current_molds + row_molds > heat_mold_limit:
+            continue
+
+        post_weight_util = min((current_weight + row_weight) / heat_weight_limit_lbs, 1.0)
+        post_mold_util = min((current_molds + row_molds) / heat_mold_limit, 1.0)
+        fill_score = post_weight_util + post_mold_util
+        tie_breaker = pd.to_datetime(row.get("Due Date Sort"), errors="coerce")
+        tie_value = tie_breaker.value if not pd.isna(tie_breaker) else pd.Timestamp.max.value
+        score = (fill_score, -tie_value)
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_key = candidate_key
+
+    return best_key
+
+
+def _order_group_rows_for_heat_fill(
+    group_df,
+    heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS,
+    heat_mold_limit=HEAT_MOLD_LIMIT,
+):
+    """Order non-urgent rows in one compatibility group to improve heat fill."""
+    if group_df.empty:
+        return group_df.copy()
+
+    local_df = group_df.copy().reset_index(drop=True)
+    compatibility_map = _build_compatibility_map_from_frame(local_df)
+
+    rows = {}
+    for index, row in local_df.iterrows():
+        row_weight, row_molds = _row_weight_and_molds(row)
+        rows[index] = {
+            "row": row,
+            "weight": row_weight,
+            "molds": row_molds,
+            "alloy": str(row.get(Columns.COL_ALLOY, "") or ""),
+            "compatibility_map": compatibility_map,
+        }
+
+    ordered_indices = []
+    while rows:
+        anchor_key = max(
+            rows,
+            key=lambda idx: (
+                rows[idx]["weight"] / heat_weight_limit_lbs
+                + rows[idx]["molds"] / heat_mold_limit,
+                -(
+                    pd.to_datetime(rows[idx]["row"].get("Due Date Sort"), errors="coerce").value
+                    if not pd.isna(pd.to_datetime(rows[idx]["row"].get("Due Date Sort"), errors="coerce"))
+                    else pd.Timestamp.max.value
+                ),
+            ),
+        )
+
+        anchor = rows.pop(anchor_key)
+        ordered_indices.append(anchor_key)
+        current_weight = anchor["weight"]
+        current_molds = anchor["molds"]
+        anchor_alloy = anchor["alloy"]
+
+        # Best-fit fill: keep adding compatible rows that maximize combined utilization.
+        while rows:
+            candidate_key = _best_fit_candidate(
+                anchor_alloy,
+                rows,
+                current_weight,
+                current_molds,
+                heat_weight_limit_lbs,
+                heat_mold_limit,
+            )
+            if candidate_key is None:
+                break
+
+            candidate = rows.pop(candidate_key)
+            ordered_indices.append(candidate_key)
+            current_weight += candidate["weight"]
+            current_molds += candidate["molds"]
+
+    return local_df.loc[ordered_indices].reset_index(drop=True)
 
 
 def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
@@ -150,6 +300,8 @@ def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
     latest_due_date = valid_due_dates.max().date() if not valid_due_dates.empty else ""
     priority_rank = int(heat_df["Planning Priority Rank"].min())
     priority_row = heat_df[heat_df["Planning Priority Rank"] == priority_rank].iloc[0]
+    total_weight = float(heat_df["Total Weight per EXT"].fillna(0).sum())
+    total_molds = float(heat_df["Molds for EXT"].fillna(0).sum())
 
     return {
         "Schedule Day": day,
@@ -162,8 +314,10 @@ def _summarize_heat_rows(day, heat_number, heat_df, max_planned_heats_per_day):
         "Review Window": str(priority_row.get("Review Window", "") or "").strip(),
         "Earliest Due Date": earliest_due_date,
         "Latest Due Date": latest_due_date,
-        "Total Weight (lbs)": float(heat_df["Total Weight per EXT"].fillna(0).sum()),
-        "Total Molds": float(heat_df["Molds for EXT"].fillna(0).sum()),
+        "Total Weight (lbs)": total_weight,
+        "Total Molds": total_molds,
+        "Weight Utilization %": round(min((total_weight / HEAT_WEIGHT_LIMIT_LBS) * 100.0, 100.0), 1),
+        "Mold Utilization %": round(min((total_molds / HEAT_MOLD_LIMIT) * 100.0, 100.0), 1),
         "Rows in Heat": int(len(heat_df)),
         "Jobs": ", ".join(jobs),
         "Extensions": ", ".join(extensions),
@@ -176,6 +330,7 @@ def build_melt_schedule(
     reserved_heat_slot_count=RESERVED_HEAT_SLOT_COUNT,
     heat_weight_limit_lbs=HEAT_WEIGHT_LIMIT_LBS,
     heat_mold_limit=HEAT_MOLD_LIMIT,
+    day_weight_target_lbs=DAILY_WEIGHT_TARGET_LBS,
     reference_date=None,
 ):
     """
@@ -189,7 +344,11 @@ def build_melt_schedule(
 
     reference_date = _normalize_reference_date(reference_date)
     planned_rows = prioritize_schedule_rows(schedule_df, reference_date=reference_date)
-    planned_rows = order_rows_for_alloy_grouping(planned_rows)
+    planned_rows = order_rows_for_alloy_grouping(
+        planned_rows,
+        heat_weight_limit_lbs=heat_weight_limit_lbs,
+        heat_mold_limit=heat_mold_limit,
+    )
     planned_rows = assign_heat_numbers(
         planned_rows,
         heat_weight_limit_lbs=heat_weight_limit_lbs,
@@ -200,13 +359,39 @@ def build_melt_schedule(
         return {}
 
     planned_rows = planned_rows.rename(columns={"Heat #": "Global Heat #"}).copy()
+    heat_totals = (
+        planned_rows
+        .groupby("Global Heat #", sort=True)["Total Weight per EXT"]
+        .sum()
+        .to_dict()
+    )
     heat_groups = list(planned_rows.groupby("Global Heat #", sort=True).groups.keys())
     pour_day_by_global_heat = {}
     heat_slot_by_global_heat = {}
 
-    for group_index, global_heat_number in enumerate(heat_groups, start=1):
-        pour_day_by_global_heat[global_heat_number] = ((group_index - 1) // max_planned_heats_per_day) + 1
-        heat_slot_by_global_heat[global_heat_number] = ((group_index - 1) % max_planned_heats_per_day) + 1
+    current_day = 1
+    day_heat_count = 0
+    day_weight_total = 0.0
+
+    for global_heat_number in heat_groups:
+        if day_heat_count > 0:
+            reached_heat_cap = day_heat_count >= max_planned_heats_per_day
+            reached_weight_target = (
+                day_weight_target_lbs is not None
+                and day_weight_target_lbs > 0
+                and day_weight_total >= float(day_weight_target_lbs)
+            )
+            if reached_heat_cap or reached_weight_target:
+                current_day += 1
+                day_heat_count = 0
+                day_weight_total = 0.0
+
+        day_heat_count += 1
+        heat_weight = float(heat_totals.get(global_heat_number, 0) or 0)
+        day_weight_total += heat_weight
+
+        pour_day_by_global_heat[global_heat_number] = current_day
+        heat_slot_by_global_heat[global_heat_number] = day_heat_count
 
     planned_rows["Pour Schedule Day"] = planned_rows["Global Heat #"].map(pour_day_by_global_heat)
     planned_rows["Heat #"] = planned_rows["Global Heat #"].map(heat_slot_by_global_heat)

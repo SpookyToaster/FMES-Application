@@ -4,7 +4,8 @@ Export logic for Foundry Management and Execution System (FMES).
 Builds structured export blocks from daily schedules and writes two output
 workbooks:
     Mold Schedule.xlsx  – per-day tables with job details, extension sizes, and heat numbers.
-    Heat Summary.xlsx   – melt-plan summary, daily totals, and planner worksheet.
+    Heat Summary.xlsx   – melt-plan summary, daily totals, planner worksheet,
+                          and row-level heat-plan detail.
 """
 
 from pathlib import Path
@@ -791,6 +792,55 @@ def build_heat_daily_totals_rows(summary_rows):
     return daily_rows
 
 
+def build_heat_detail_rows(melt_schedule, day_dates):
+    """Flatten per-row planned heat assignments for workbook export."""
+    detail_rows = []
+
+    for day in sorted(melt_schedule.keys()):
+        day_plan = melt_schedule.get(day, {})
+        planned_rows = day_plan.get("rows", pd.DataFrame()).copy()
+        if planned_rows.empty:
+            continue
+
+        block_date = day_dates.get(day, {}).get("date", pd.NaT)
+        schedule_date = block_date.date() if hasattr(block_date, "date") else block_date
+        schedule_weekday = day_dates.get(day, {}).get("weekday", "")
+
+        for _, row in planned_rows.iterrows():
+            due_ts = _normalize_date_value(row.get(Columns.COL_DUE_DATE, pd.NaT))
+            schedule_ts = _normalize_date_value(schedule_date)
+            due_buffer_days = None
+            if not pd.isna(due_ts) and not pd.isna(schedule_ts):
+                due_buffer_days = int((due_ts - schedule_ts).days)
+
+            row_weight = float(pd.to_numeric(row.get("Total Weight per EXT", 0), errors="coerce") or 0)
+            row_molds = int(pd.to_numeric(row.get("Molds for EXT", 0), errors="coerce") or 0)
+
+            detail_rows.append(
+                {
+                    "Schedule Date": schedule_date,
+                    "Weekday": schedule_weekday,
+                    "Pour Schedule Day": row.get("Pour Schedule Day", day),
+                    "Heat #": row.get("Heat #", ""),
+                    "Global Heat #": row.get("Global Heat #", ""),
+                    "Planning Priority": row.get("Planning Priority", ""),
+                    "Review Window": row.get("Review Window", ""),
+                    "Days Until Due": row.get("Days Until Due", ""),
+                    "Due Date": _normalize_due_date(row.get(Columns.COL_DUE_DATE, "")),
+                    "Due Buffer Days": due_buffer_days,
+                    "Compatibility Group": row.get("Compatibility Group", ""),
+                    "Alloy": row.get(Columns.COL_ALLOY, ""),
+                    "Job Number": row.get(Columns.COL_JOB_NUMBER, ""),
+                    "EXT": row.get("EXT", ""),
+                    "Extension_Seq": row.get("Extension_Seq", ""),
+                    "Molds for EXT": row_molds,
+                    "Total Weight per EXT": row_weight,
+                }
+            )
+
+    return detail_rows
+
+
 def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx"):
     """
     Write the heat summary workbook.
@@ -799,6 +849,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
     Sheet 2 "Daily Heat Totals"     – one row per day with aggregate counts.
     Sheet 3 "Due Buffer Compliance" – 14-day target compliance diagnostics.
     Sheet 4 "Heat Planner"          – planner-facing worksheet with manual fill columns.
+    Sheet 5 "Detailed Plan Rows"    – row-level planned heats with due-date context.
 
     Args:
         melt_schedule: Output of build_melt_schedule.
@@ -1170,6 +1221,93 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             ws_planner.column_dimensions[col].width = width
 
         _apply_11x17_portrait_layout(ws_planner)
+
+        ws_detail = wb.create_sheet("Detailed Plan Rows")
+        detail_headers = [
+            "Schedule Date",
+            "Weekday",
+            "Pour Schedule Day",
+            "Heat #",
+            "Global Heat #",
+            "Planning Priority",
+            "Review Window",
+            "Days Until Due",
+            "Due Date",
+            "Due Buffer Days",
+            "Compatibility Group",
+            "Alloy",
+            "Job Number",
+            "EXT",
+            "Extension_Seq",
+            "Molds for EXT",
+            "Total Weight per EXT",
+        ]
+
+        for col_num, header in enumerate(detail_headers, start=1):
+            cell = ws_detail.cell(1, col_num, header)
+            cell.font = bold
+            cell.border = thin
+
+        detail_rows = build_heat_detail_rows(melt_schedule, day_dates)
+        current_row = 2
+
+        for row in detail_rows:
+            values = [
+                row["Schedule Date"],
+                row["Weekday"],
+                row["Pour Schedule Day"],
+                row["Heat #"],
+                row["Global Heat #"],
+                row["Planning Priority"],
+                row["Review Window"],
+                row["Days Until Due"],
+                row["Due Date"],
+                row["Due Buffer Days"],
+                row["Compatibility Group"],
+                row["Alloy"],
+                row["Job Number"],
+                row["EXT"],
+                row["Extension_Seq"],
+                row["Molds for EXT"],
+                row["Total Weight per EXT"],
+            ]
+
+            for col_num, value in enumerate(values, start=1):
+                cell = ws_detail.cell(current_row, col_num, value)
+                cell.border = thin
+                if col_num in {1, 9} and value != "":
+                    cell.number_format = "m/d/yyyy"
+                if col_num == 17 and value != "":
+                    cell.number_format = "#,##0.00"
+                if col_num == 16 and value != "":
+                    cell.number_format = "#,##0"
+
+            current_row += 1
+
+        detail_widths = {
+            "A": 14,
+            "B": 12,
+            "C": 14,
+            "D": 8,
+            "E": 10,
+            "F": 18,
+            "G": 14,
+            "H": 12,
+            "I": 12,
+            "J": 12,
+            "K": 18,
+            "L": 12,
+            "M": 12,
+            "N": 8,
+            "O": 12,
+            "P": 12,
+            "Q": 18,
+        }
+
+        for col, width in detail_widths.items():
+            ws_detail.column_dimensions[col].width = width
+
+        _apply_11x17_portrait_layout(ws_detail)
 
         wb.save(output_file)
         print(f"Saved: {output_file}")

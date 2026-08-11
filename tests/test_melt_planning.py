@@ -142,13 +142,13 @@ class MeltPlanningTests(unittest.TestCase):
 
         self.assertEqual(planned_rows["Heat #"].tolist(), [1, 2])
 
-    def test_build_melt_schedule_prefers_match_all_anchor_to_maximize_grouping(self):
+    def test_build_melt_schedule_prioritizes_due_date_inside_two_weeks(self):
         schedule_df = pd.DataFrame([
             {
                 "Schedule Day": 1,
                 Columns.COL_JOB_NUMBER: "9181",
-                Columns.COL_DUE_DATE: "2026-08-15",
-                Columns.COL_ALLOY: "ALLOY-A",
+                Columns.COL_DUE_DATE: "2026-08-11",
+                Columns.COL_ALLOY: "WCB",
                 "Compatibility Group": "G1",
                 "Compatible With ASTM Group": "NO",
                 "Specific Compatible Alloys": "",
@@ -160,8 +160,8 @@ class MeltPlanningTests(unittest.TestCase):
             {
                 "Schedule Day": 1,
                 Columns.COL_JOB_NUMBER: "9182",
-                Columns.COL_DUE_DATE: "2026-08-16",
-                Columns.COL_ALLOY: "ALLOY-B",
+                Columns.COL_DUE_DATE: "2026-08-18",
+                Columns.COL_ALLOY: "WCB",
                 "Compatibility Group": "G1",
                 "Compatible With ASTM Group": "YES",
                 "Specific Compatible Alloys": "",
@@ -177,7 +177,60 @@ class MeltPlanningTests(unittest.TestCase):
 
         self.assertEqual(melt_schedule[1]["planned_heat_count"], 1)
         self.assertEqual(planned_rows["Heat #"].tolist(), [1, 1])
-        self.assertEqual(planned_rows.iloc[0][Columns.COL_ALLOY], "ALLOY-B")
+        self.assertEqual(planned_rows.iloc[0][Columns.COL_JOB_NUMBER], "9181")
+
+    def test_build_melt_schedule_optimizes_non_urgent_rows_for_heat_fill(self):
+        schedule_df = pd.DataFrame([
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "9501",
+                Columns.COL_DUE_DATE: "2026-09-10",
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 1300,
+                "Molds for EXT": 2,
+                "Extension_Seq": 0,
+                "EXT": "A",
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "9502",
+                Columns.COL_DUE_DATE: "2026-09-11",
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 1000,
+                "Molds for EXT": 2,
+                "Extension_Seq": 1,
+                "EXT": "B",
+            },
+            {
+                "Schedule Day": 1,
+                Columns.COL_JOB_NUMBER: "9503",
+                Columns.COL_DUE_DATE: "2026-09-12",
+                Columns.COL_ALLOY: "WCB",
+                "Compatibility Group": "A216",
+                "Compatible With ASTM Group": "YES",
+                "Specific Compatible Alloys": "",
+                "Total Weight per EXT": 900,
+                "Molds for EXT": 2,
+                "Extension_Seq": 2,
+                "EXT": "C",
+            },
+        ])
+
+        melt_schedule = build_melt_schedule(schedule_df, reference_date="2026-08-10")
+        planned_rows = melt_schedule[1]["rows"]
+        heat_totals = (
+            planned_rows.groupby("Heat #")["Total Weight per EXT"].sum().to_dict()
+        )
+
+        self.assertEqual(melt_schedule[1]["planned_heat_count"], 2)
+        self.assertEqual(heat_totals.get(1), 2300)
+        self.assertEqual(heat_totals.get(2), 900)
 
     def test_build_melt_schedule_allows_single_row_weight_over_limit(self):
         schedule_df = pd.DataFrame([
@@ -237,6 +290,31 @@ class MeltPlanningTests(unittest.TestCase):
 
         self.assertEqual(melt_schedule[1]["planned_heat_count"], 5)
         self.assertEqual(melt_schedule[1]["overflow_heat_count"], 0)
+        self.assertEqual(melt_schedule[2]["planned_heat_count"], 1)
+        self.assertEqual(melt_schedule[2]["rows"].iloc[0]["Heat #"], 1)
+
+    def test_build_melt_schedule_starts_new_day_after_daily_weight_target(self):
+        rows = []
+        for index in range(5):
+            rows.append(
+                {
+                    "Schedule Day": 1,
+                    Columns.COL_JOB_NUMBER: f"960{index}",
+                    Columns.COL_DUE_DATE: f"2026-09-{10 + index:02d}",
+                    Columns.COL_ALLOY: f"ALLOY-{index}",
+                    "Compatibility Group": f"GROUP-{index}",
+                    "Compatible With ASTM Group": "NO",
+                    "Specific Compatible Alloys": "",
+                    "Total Weight per EXT": 2600,
+                    "Molds for EXT": 1,
+                    "Extension_Seq": index,
+                    "EXT": chr(65 + index),
+                }
+            )
+
+        melt_schedule = build_melt_schedule(pd.DataFrame(rows), reference_date="2026-08-10")
+
+        self.assertEqual(melt_schedule[1]["planned_heat_count"], 4)
         self.assertEqual(melt_schedule[2]["planned_heat_count"], 1)
         self.assertEqual(melt_schedule[2]["rows"].iloc[0]["Heat #"], 1)
 

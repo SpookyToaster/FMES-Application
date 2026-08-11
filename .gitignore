@@ -17,3 +17,5 @@ dist_tmp/
 *.egg-info/
 
 .pytest_cache/
+
+Session_Context_*
