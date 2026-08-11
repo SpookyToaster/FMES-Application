@@ -23,6 +23,7 @@ class HeatScheduleMainTests(unittest.TestCase):
                 }
             },
             "melt_schedule": {1: {"heat_summary": pd.DataFrame()}},
+            "mold_schedule_frame": pd.DataFrame(),
             "mold_day_dates": {
                 1: {"date": pd.Timestamp("2026-08-10"), "weekday": "Monday"}
             },
@@ -43,6 +44,7 @@ class HeatScheduleMainTests(unittest.TestCase):
             schedule_result["melt_schedule"],
             schedule_result["pour_day_dates"],
             "heat_only.xlsx",
+            mold_schedule_frame=schedule_result["mold_schedule_frame"],
         )
         export_mold_schedule.assert_not_called()
         self.assertEqual(result["heat_output_file"], "heat_only.xlsx")
@@ -52,6 +54,7 @@ class HeatScheduleMainTests(unittest.TestCase):
         schedule_result = {
             "export_blocks": {},
             "melt_schedule": {},
+            "mold_schedule_frame": pd.DataFrame(),
             "mold_day_dates": {},
             "pour_day_dates": {},
         }

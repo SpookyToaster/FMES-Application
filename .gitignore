@@ -19,3 +19,6 @@ dist_tmp/
 .pytest_cache/
 
 Session_Context_*
+
+settings.json
+.vscode/settings.json

@@ -616,12 +616,13 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
         raise RuntimeError(f"Failed while exporting mold schedule to {output_file}") from exc
 
 
-def build_heat_summary_rows(export_blocks):
+def build_heat_summary_rows(export_blocks, mold_schedule_frame=None):
     """
     Aggregate melt-plan summary rows into a dated export-friendly shape.
 
     Returns:
         list of dicts based on melt_schedule[day]['heat_summary'] plus schedule date metadata.
+        When mold_schedule_frame is provided, includes planner-facing mold lead metrics.
     """
     summary_rows = []
 
@@ -632,6 +633,33 @@ def build_heat_summary_rows(export_blocks):
 
     if day_dates is None:
         raise RuntimeError("build_heat_summary_rows requires melt_schedule and day_dates")
+
+    mold_lead_by_heat = {}
+    if mold_schedule_frame is not None and not mold_schedule_frame.empty:
+        lead_frame = mold_schedule_frame.copy()
+        lead_frame["_MoldLeadDays"] = (
+            pd.to_numeric(lead_frame.get("Pour Schedule Day"), errors="coerce")
+            - pd.to_numeric(lead_frame.get("Schedule Day"), errors="coerce")
+        )
+        lead_frame = lead_frame[lead_frame["_MoldLeadDays"].notna()].copy()
+        if not lead_frame.empty:
+            grouped_lead = (
+                lead_frame
+                .groupby(["Pour Schedule Day", "Heat #"], dropna=False)
+                .agg(
+                    MaxMoldLeadDays=("_MoldLeadDays", "max"),
+                    AvgMoldLeadDays=("_MoldLeadDays", "mean"),
+                )
+                .reset_index()
+            )
+            for _, lead_row in grouped_lead.iterrows():
+                mold_lead_by_heat[(
+                    int(lead_row["Pour Schedule Day"]),
+                    lead_row["Heat #"],
+                )] = {
+                    "Max Mold Lead Days": int(round(float(lead_row["MaxMoldLeadDays"]))),
+                    "Avg Mold Lead Days": round(float(lead_row["AvgMoldLeadDays"]), 1),
+                }
 
     for day in sorted(melt_schedule.keys()):
         heat_summary = melt_schedule[day].get("heat_summary", pd.DataFrame()).copy()
@@ -677,6 +705,7 @@ def build_heat_summary_rows(export_blocks):
             if not pd.isna(earliest_due) and not pd.isna(schedule_ts):
                 due_buffer_days = int((earliest_due - schedule_ts).days)
             buffer_status, diagnostic = _planner_risk_for_buffer(due_buffer_days)
+            lead_metrics = mold_lead_by_heat.get((int(day), heat_number), {})
 
             summary_rows.append(
                 {
@@ -699,6 +728,8 @@ def build_heat_summary_rows(export_blocks):
                     "Rows in Heat": int(row.get("Rows in Heat", 0) or 0),
                     "Jobs": row.get("Jobs", ""),
                     "Extensions": row.get("Extensions", ""),
+                    "Max Mold Lead Days": lead_metrics.get("Max Mold Lead Days", ""),
+                    "Avg Mold Lead Days": lead_metrics.get("Avg Mold Lead Days", ""),
                     "Job Breakout": heat_breakout_map.get(heat_number, ""),
                     "Planner Diagnostic": diagnostic,
                 }
@@ -732,6 +763,8 @@ def build_heat_planner_rows(summary_rows):
                 "Total Molds": row["Total Molds"],
                 "Jobs": row["Jobs"],
                 "Extensions": row["Extensions"],
+                "Max Mold Lead Days": row.get("Max Mold Lead Days", ""),
+                "Avg Mold Lead Days": row.get("Avg Mold Lead Days", ""),
                 "Planner Diagnostic": row["Planner Diagnostic"],
                 "Manual Alloy": "",
                 "Manual Weight (lbs)": "",
@@ -841,7 +874,7 @@ def build_heat_detail_rows(melt_schedule, day_dates):
     return detail_rows
 
 
-def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx"):
+def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx", mold_schedule_frame=None):
     """
     Write the heat summary workbook.
 
@@ -882,6 +915,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Rows in Heat",
             "Jobs",
             "Extensions",
+            "Max Mold Lead Days",
+            "Avg Mold Lead Days",
             "Job Breakout",
             "Planner Diagnostic",
         ]
@@ -894,7 +929,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             bottom=Side(style="thin"),
         )
 
-        summary_rows = build_heat_summary_rows((melt_schedule, day_dates))
+        summary_rows = build_heat_summary_rows((melt_schedule, day_dates), mold_schedule_frame=mold_schedule_frame)
         current_row = 1
 
         summary_df = pd.DataFrame(summary_rows)
@@ -938,6 +973,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                         row["Rows in Heat"],
                         row["Jobs"],
                         row["Extensions"],
+                        row.get("Max Mold Lead Days", ""),
+                        row.get("Avg Mold Lead Days", ""),
                         row["Job Breakout"],
                         row["Planner Diagnostic"],
                     ]
@@ -951,7 +988,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                             cell.number_format = "#,##0.00"
                         if col_num == 16:
                             cell.number_format = "#,##0"
-                        if col_num in {20, 21}:
+                        if col_num in {22, 23}:
                             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
                     current_row += 1
@@ -984,8 +1021,10 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Q": 9,
             "R": 16,
             "S": 18,
-            "T": 30,
-            "U": 26,
+            "T": 14,
+            "U": 14,
+            "V": 30,
+            "W": 26,
         }
 
         for col, width in widths.items():
@@ -1135,6 +1174,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Total Molds",
             "Jobs",
             "Extensions",
+            "Max Mold Lead Days",
+            "Avg Mold Lead Days",
             "Planner Diagnostic",
             "Manual Alloy",
             "Manual Weight (lbs)",
@@ -1170,6 +1211,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 row["Total Molds"],
                 row["Jobs"],
                 row["Extensions"],
+                row.get("Max Mold Lead Days", ""),
+                row.get("Avg Mold Lead Days", ""),
                 row["Planner Diagnostic"],
                 row["Manual Alloy"],
                 row["Manual Weight (lbs)"],
@@ -1186,7 +1229,7 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                     cell.number_format = "#,##0.00"
                 if col_num in {16, 22} and value != "":
                     cell.number_format = "#,##0"
-                if col_num in {20, 25}:
+                if col_num in {22, 27}:
                     cell.alignment = Alignment(wrap_text=True, vertical="top")
 
             current_row += 1
@@ -1210,11 +1253,13 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "P": 12,
             "Q": 24,
             "R": 28,
-            "S": 30,
-            "T": 15,
-            "U": 18,
-            "V": 14,
-            "W": 28,
+            "S": 14,
+            "T": 14,
+            "U": 30,
+            "V": 15,
+            "W": 18,
+            "X": 14,
+            "Y": 28,
         }
 
         for col, width in planner_widths.items():

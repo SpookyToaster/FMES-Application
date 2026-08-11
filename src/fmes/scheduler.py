@@ -188,6 +188,7 @@ def schedule_molds():
         return {
             "export_blocks": export_blocks,
             "melt_schedule": melt_schedule,
+            "mold_schedule_frame": mold_schedule_frame,
             "mold_day_dates": mold_day_dates,
             "pour_day_dates": pour_day_dates,
             "job_shipping_rows": job_shipping_rows,
