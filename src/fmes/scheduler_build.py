@@ -447,7 +447,21 @@ def assign_mold_days_from_heat_plan(planned_rows):
             heat_rows = [row for _, row in heat_df.iterrows()]
             minimum_days_needed = _heat_minimum_mold_days(heat_rows)
 
-            pour_day = max(_safe_int(original_pour_day, default=1), last_pour_day, 2)
+            min_days_until_due = pd.to_numeric(
+                heat_df.get("Days Until Due", pd.Series(dtype="float64")),
+                errors="coerce",
+            ).dropna()
+            no_time_exception = (
+                not min_days_until_due.empty
+                and float(min_days_until_due.min()) < 14
+            )
+
+            if no_time_exception:
+                # If due date runway is already below two weeks, pour at the
+                # earliest feasible slot and back-schedule molds immediately.
+                pour_day = max(last_pour_day, 2)
+            else:
+                pour_day = max(_safe_int(original_pour_day, default=1), last_pour_day, 2)
             placements = None
             for _ in range(3660):  # hard stop so a bad input cannot loop forever
                 if pours_per_day.get(pour_day, 0) >= MAX_PLANNED_HEATS_PER_DAY:

@@ -288,6 +288,7 @@ class SchedulerExportTests(unittest.TestCase):
         self.assertEqual(summary[0]["Total Molds"], 4.0)
         self.assertEqual(summary[0]["Max Mold Lead Days"], 0)
         self.assertEqual(summary[0]["Avg Mold Lead Days"], 0.0)
+        self.assertEqual(summary[0]["Two Week Rule Status"], "VIOLATION")
         self.assertEqual(
             summary[0]["Job Breakout"],
             "5001-A | Due 08/04/2026 | Molds 2; 5001-B | Due 08/05/2026 | Molds 2",
@@ -444,9 +445,13 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(4, 8).value, "LEW15")
             self.assertEqual(ws.cell(3, 20).value, "Max Mold Lead Days")
             self.assertEqual(ws.cell(3, 21).value, "Avg Mold Lead Days")
-            self.assertEqual(ws.cell(3, 22).value, "Job Breakout")
+            self.assertEqual(ws.cell(3, 22).value, "Two Week Rule Status")
+            self.assertEqual(ws.cell(3, 23).value, "Two Week Rule Note")
+            self.assertEqual(ws.cell(3, 24).value, "Job Breakout")
+            self.assertEqual(ws.cell(4, 22).value, "VIOLATION")
+            self.assertEqual(ws.cell(4, 22).fill.start_color.rgb, "00FFC7CE")
             self.assertEqual(
-                ws.cell(4, 22).value,
+                ws.cell(4, 24).value,
                 "5001-A | Due 08/04/2026 | Molds 2",
             )
 
@@ -466,9 +471,13 @@ class SchedulerExportTests(unittest.TestCase):
             ws_planner = wb["Heat Planner"]
             self.assertEqual(ws_planner.cell(1, 19).value, "Max Mold Lead Days")
             self.assertEqual(ws_planner.cell(1, 20).value, "Avg Mold Lead Days")
-            self.assertEqual(ws_planner.cell(1, 22).value, "Manual Alloy")
+            self.assertEqual(ws_planner.cell(1, 21).value, "Two Week Rule Status")
+            self.assertEqual(ws_planner.cell(1, 22).value, "Two Week Rule Note")
+            self.assertEqual(ws_planner.cell(1, 24).value, "Manual Alloy")
+            self.assertEqual(ws_planner.cell(2, 21).value, "VIOLATION")
+            self.assertEqual(ws_planner.cell(2, 21).fill.start_color.rgb, "00FFC7CE")
             self.assertEqual(ws_planner.cell(4, 3).value, 6)
-            self.assertEqual(ws_planner.cell(4, 22).value, None)
+            self.assertEqual(ws_planner.cell(4, 24).value, None)
 
             ws_detail = wb["Detailed Plan Rows"]
             self.assertEqual(ws_detail.cell(1, 1).value, "Schedule Date")

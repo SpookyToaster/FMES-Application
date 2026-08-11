@@ -671,10 +671,19 @@ def build_heat_summary_rows(export_blocks, mold_schedule_frame=None):
         block_weekday = day_dates[day]["weekday"]
 
         heat_breakout_map = {}
+        heat_min_days_until_due = {}
         if not planned_rows.empty and "Heat #" in planned_rows.columns:
             for heat_number, heat_df in planned_rows.groupby("Heat #", sort=True):
                 if pd.isna(heat_number) or heat_number == "":
                     continue
+
+                due_days = pd.to_numeric(
+                    heat_df.get("Days Until Due", pd.Series(dtype="float64")),
+                    errors="coerce",
+                ).dropna()
+                heat_min_days_until_due[heat_number] = (
+                    int(due_days.min()) if not due_days.empty else None
+                )
 
                 detail_rows = []
                 for _, planned_row in heat_df.iterrows():
@@ -706,6 +715,20 @@ def build_heat_summary_rows(export_blocks, mold_schedule_frame=None):
                 due_buffer_days = int((earliest_due - schedule_ts).days)
             buffer_status, diagnostic = _planner_risk_for_buffer(due_buffer_days)
             lead_metrics = mold_lead_by_heat.get((int(day), heat_number), {})
+            min_days_until_due = heat_min_days_until_due.get(heat_number, None)
+
+            if due_buffer_days is None:
+                two_week_status = "UNKNOWN"
+                two_week_note = "Cannot evaluate two-week rule without due date"
+            elif due_buffer_days >= 14:
+                two_week_status = "PASS"
+                two_week_note = "Pour is at least 14 days before due"
+            elif min_days_until_due is not None and min_days_until_due < 14:
+                two_week_status = "EXCEPTION - NO TIME"
+                two_week_note = "Due is already inside 14 days; poured at earliest feasible slot"
+            else:
+                two_week_status = "VIOLATION"
+                two_week_note = "Pour is inside 14-day window even though due runway exists"
 
             summary_rows.append(
                 {
@@ -730,6 +753,8 @@ def build_heat_summary_rows(export_blocks, mold_schedule_frame=None):
                     "Extensions": row.get("Extensions", ""),
                     "Max Mold Lead Days": lead_metrics.get("Max Mold Lead Days", ""),
                     "Avg Mold Lead Days": lead_metrics.get("Avg Mold Lead Days", ""),
+                    "Two Week Rule Status": two_week_status,
+                    "Two Week Rule Note": two_week_note,
                     "Job Breakout": heat_breakout_map.get(heat_number, ""),
                     "Planner Diagnostic": diagnostic,
                 }
@@ -765,6 +790,8 @@ def build_heat_planner_rows(summary_rows):
                 "Extensions": row["Extensions"],
                 "Max Mold Lead Days": row.get("Max Mold Lead Days", ""),
                 "Avg Mold Lead Days": row.get("Avg Mold Lead Days", ""),
+                "Two Week Rule Status": row.get("Two Week Rule Status", ""),
+                "Two Week Rule Note": row.get("Two Week Rule Note", ""),
                 "Planner Diagnostic": row["Planner Diagnostic"],
                 "Manual Alloy": "",
                 "Manual Weight (lbs)": "",
@@ -917,6 +944,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Extensions",
             "Max Mold Lead Days",
             "Avg Mold Lead Days",
+            "Two Week Rule Status",
+            "Two Week Rule Note",
             "Job Breakout",
             "Planner Diagnostic",
         ]
@@ -928,6 +957,20 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             top=Side(style="thin"),
             bottom=Side(style="thin"),
         )
+        fill_green = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
+        fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
+        fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
+        fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
+
+        def _two_week_status_fill(status):
+            status_text = str(status or "").strip().upper()
+            if status_text == "PASS":
+                return fill_green
+            if status_text == "EXCEPTION - NO TIME":
+                return fill_yellow
+            if status_text == "VIOLATION":
+                return fill_red
+            return fill_gray
 
         summary_rows = build_heat_summary_rows((melt_schedule, day_dates), mold_schedule_frame=mold_schedule_frame)
         current_row = 1
@@ -975,6 +1018,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                         row["Extensions"],
                         row.get("Max Mold Lead Days", ""),
                         row.get("Avg Mold Lead Days", ""),
+                        row.get("Two Week Rule Status", ""),
+                        row.get("Two Week Rule Note", ""),
                         row["Job Breakout"],
                         row["Planner Diagnostic"],
                     ]
@@ -988,8 +1033,10 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                             cell.number_format = "#,##0.00"
                         if col_num == 16:
                             cell.number_format = "#,##0"
-                        if col_num in {22, 23}:
+                        if col_num in {23, 24, 25}:
                             cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+                    ws.cell(current_row, 22).fill = _two_week_status_fill(row.get("Two Week Rule Status", ""))
 
                     current_row += 1
 
@@ -1023,8 +1070,10 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "S": 18,
             "T": 14,
             "U": 14,
-            "V": 30,
-            "W": 26,
+            "V": 16,
+            "W": 36,
+            "X": 30,
+            "Y": 26,
         }
 
         for col, width in widths.items():
@@ -1176,6 +1225,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "Extensions",
             "Max Mold Lead Days",
             "Avg Mold Lead Days",
+            "Two Week Rule Status",
+            "Two Week Rule Note",
             "Planner Diagnostic",
             "Manual Alloy",
             "Manual Weight (lbs)",
@@ -1213,6 +1264,8 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 row["Extensions"],
                 row.get("Max Mold Lead Days", ""),
                 row.get("Avg Mold Lead Days", ""),
+                row.get("Two Week Rule Status", ""),
+                row.get("Two Week Rule Note", ""),
                 row["Planner Diagnostic"],
                 row["Manual Alloy"],
                 row["Manual Weight (lbs)"],
@@ -1225,12 +1278,14 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
                 cell.border = thin
                 if col_num in {1, 10, 11, 12} and value != "":
                     cell.number_format = "m/d/yyyy"
-                if col_num in {15, 21} and value != "":
+                if col_num in {15, 25} and value != "":
                     cell.number_format = "#,##0.00"
-                if col_num in {16, 22} and value != "":
+                if col_num in {16, 26} and value != "":
                     cell.number_format = "#,##0"
-                if col_num in {22, 27}:
+                if col_num in {22, 23, 27}:
                     cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+            ws_planner.cell(current_row, 21).fill = _two_week_status_fill(row.get("Two Week Rule Status", ""))
 
             current_row += 1
 
@@ -1255,11 +1310,13 @@ def export_heat_summary(melt_schedule, day_dates, output_file="Heat Summary.xlsx
             "R": 28,
             "S": 14,
             "T": 14,
-            "U": 30,
-            "V": 15,
-            "W": 18,
-            "X": 14,
-            "Y": 28,
+            "U": 18,
+            "V": 36,
+            "W": 30,
+            "X": 15,
+            "Y": 18,
+            "Z": 14,
+            "AA": 28,
         }
 
         for col, width in planner_widths.items():
