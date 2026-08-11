@@ -15,7 +15,7 @@ if (-not (Test-Path $pythonExe)) {
 $testModules = @(
     'tests.test_melt_planning',
     'tests.test_scheduler_integration',
-    'tests.test_mold_schedule_from_melt'
+    'tests.test_scheduler_build'
 )
 
 Push-Location $repoRoot

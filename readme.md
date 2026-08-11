@@ -192,13 +192,7 @@ prioritize_schedule_rows()
 apply 10-week melt horizon
         │
         ▼
-order_rows_for_alloy_grouping()
-        │
-        ▼
-build_melt_schedule()
-        │
-        ▼
-assign_mold_days_from_heat_plan()
+seed melt rows from prioritized alloy groups
         │
         ▼
 build_schedule_dates()

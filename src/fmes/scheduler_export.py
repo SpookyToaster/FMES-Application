@@ -112,6 +112,7 @@ REPORT_SUBTITLE_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_
 REPORT_HEADER_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_color="D9E2F3")
 REPORT_TOTAL_FILL = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
 REPORT_SEPARATOR_FILL = PatternFill(fill_type="solid", start_color="FFFFFF", end_color="FFFFFF")
+MOLD_LEAD_DIAGNOSTIC_WINDOW_DAYS = 5
 
 
 def _write_schedule_banner(ws, title, created_on, metric_label, metric_value, last_column):
@@ -218,6 +219,161 @@ def _build_melt_capacity_rows(melt_schedule):
         )
 
     return capacity_rows
+
+
+def _add_business_days(start_date, offset_days):
+    """Return a weekday-only date shifted by offset_days from start_date."""
+    if pd.isna(start_date):
+        return pd.NaT
+
+    current = pd.Timestamp(start_date).normalize()
+    if offset_days == 0:
+        return current
+
+    step = 1 if offset_days > 0 else -1
+    remaining = abs(int(offset_days))
+    while remaining > 0:
+        current += pd.Timedelta(days=step)
+        while current.weekday() > 4:
+            current += pd.Timedelta(days=step)
+        remaining -= 1
+    return current
+
+
+def _resolve_schedule_day_date(day_value, day_dates):
+    """Resolve a schedule day to a calendar date, even if day is not mapped."""
+    if not day_dates:
+        return pd.NaT
+
+    try:
+        day_int = int(day_value)
+    except (TypeError, ValueError):
+        return pd.NaT
+
+    if day_int in day_dates:
+        return _normalize_date_value(day_dates.get(day_int, {}).get("date", pd.NaT))
+
+    known_days = sorted(int(day) for day in day_dates.keys())
+    if not known_days:
+        return pd.NaT
+
+    anchor_day = known_days[0]
+    anchor_date = _normalize_date_value(day_dates.get(anchor_day, {}).get("date", pd.NaT))
+    if pd.isna(anchor_date):
+        return pd.NaT
+
+    return _add_business_days(anchor_date, day_int - anchor_day)
+
+
+def _build_melt_gap_diagnostics(melt_schedule, day_dates, mold_schedule_frame):
+    """Summarize skipped pour days and likely causes using mold-window capacity evidence."""
+    if not melt_schedule:
+        return []
+
+    pour_days = sorted(int(day) for day in melt_schedule.keys())
+    if not pour_days:
+        return []
+
+    present_days = set(pour_days)
+
+    day_usage = {}
+    if mold_schedule_frame is not None and not mold_schedule_frame.empty and "Schedule Day" in mold_schedule_frame.columns:
+        mold_frame = mold_schedule_frame.copy()
+        cast_types = mold_frame.get(Columns.COL_CAST_TYPE, pd.Series("", index=mold_frame.index)).fillna("").astype(str).str.strip().str.upper()
+        mold_counts = pd.to_numeric(mold_frame.get("Molds for EXT", pd.Series(0, index=mold_frame.index)), errors="coerce").fillna(0)
+        schedule_days = pd.to_numeric(mold_frame.get("Schedule Day", pd.Series(dtype="float64")), errors="coerce")
+
+        for day_value, cast_type, mold_count in zip(
+            schedule_days.tolist(),
+            cast_types.tolist(),
+            mold_counts.tolist(),
+        ):
+            if pd.isna(day_value):
+                continue
+            day_int = int(day_value)
+            usage = day_usage.setdefault(day_int, {"L": 0, "F": 0})
+            molds = int(round(float(mold_count)))
+            bucket = "F" if cast_type == "F" else "L"
+            usage[bucket] += max(molds, 0)
+
+    heat_moves = pd.DataFrame()
+    if (
+        mold_schedule_frame is not None
+        and not mold_schedule_frame.empty
+        and "Original Pour Schedule Day" in mold_schedule_frame.columns
+        and "Pour Schedule Day" in mold_schedule_frame.columns
+        and "Heat #" in mold_schedule_frame.columns
+    ):
+        heat_moves = mold_schedule_frame[["Original Pour Schedule Day", "Pour Schedule Day", "Heat #"]].copy()
+        heat_moves["Original Pour Schedule Day"] = pd.to_numeric(
+            heat_moves["Original Pour Schedule Day"],
+            errors="coerce",
+        )
+        heat_moves["Pour Schedule Day"] = pd.to_numeric(
+            heat_moves["Pour Schedule Day"],
+            errors="coerce",
+        )
+        heat_moves = heat_moves.dropna(subset=["Original Pour Schedule Day", "Pour Schedule Day", "Heat #"]).copy()
+        if not heat_moves.empty:
+            heat_moves["Original Pour Schedule Day"] = heat_moves["Original Pour Schedule Day"].astype(int)
+            heat_moves["Pour Schedule Day"] = heat_moves["Pour Schedule Day"].astype(int)
+            heat_moves = heat_moves.drop_duplicates()
+
+    diagnostic_rows = []
+    for day in range(min(pour_days), max(pour_days) + 1):
+        if day in present_days:
+            continue
+
+        window_start = max(1, day - MOLD_LEAD_DIAGNOSTIC_WINDOW_DAYS)
+        window_days = list(range(window_start, day))
+        line_capacity = len(window_days) * DailyMoldLimits.MAX_L_MOLDS_PER_DAY
+        floor_capacity = len(window_days) * DailyMoldLimits.MAX_F_MOLDS_PER_DAY
+        line_used = sum(day_usage.get(window_day, {}).get("L", 0) for window_day in window_days)
+        floor_used = sum(day_usage.get(window_day, {}).get("F", 0) for window_day in window_days)
+        line_free = max(line_capacity - line_used, 0)
+        floor_free = max(floor_capacity - floor_used, 0)
+
+        originally_planned = 0
+        pushed_later = 0
+        pushed_to_days = ""
+        if not heat_moves.empty:
+            original_mask = heat_moves["Original Pour Schedule Day"] == day
+            originally_planned = int(original_mask.sum())
+            pushed_mask = original_mask & (heat_moves["Pour Schedule Day"] > day)
+            pushed_later = int(pushed_mask.sum())
+            pushed_days = sorted(int(value) for value in heat_moves.loc[pushed_mask, "Pour Schedule Day"].unique())
+            pushed_to_days = ", ".join(str(value) for value in pushed_days)
+
+        if originally_planned <= 0:
+            likely_cause = "No heats remained targeted to this day after sequencing and prioritization."
+        elif pushed_later <= 0:
+            likely_cause = "No final pours landed on this day after melt-plan rebuild."
+        elif line_free <= 0 and floor_free <= 0:
+            likely_cause = "Original heats were pushed later because no pre-pour line or floor mold capacity remained in the 5-day window."
+        elif line_free <= 0:
+            likely_cause = "Original heats were pushed later because line mold capacity was fully consumed in the 5-day window."
+        elif floor_free <= 0:
+            likely_cause = "Original heats were pushed later because floor mold capacity was fully consumed in the 5-day window."
+        else:
+            likely_cause = "Original heats were pushed later to keep heat sequence and mold constraints feasible."
+
+        resolved_date = _resolve_schedule_day_date(day, day_dates)
+        diagnostic_rows.append(
+            {
+                "Skipped Pour Day": day,
+                "Skipped Pour Date": _normalize_due_date(resolved_date) if not pd.isna(resolved_date) else "",
+                "Weekday": pd.Timestamp(resolved_date).strftime("%A") if not pd.isna(resolved_date) else "",
+                "Original Heats On Day": originally_planned,
+                "Heats Pushed Later": pushed_later,
+                "Pushed To Pour Days": pushed_to_days,
+                "Mold Window Days": f"{window_start}-{day - 1}" if window_days else "",
+                "Window Line Usage": f"{line_used}/{line_capacity}",
+                "Window Floor Usage": f"{floor_used}/{floor_capacity}",
+                "Likely Cause": likely_cause,
+            }
+        )
+
+    return diagnostic_rows
 
 
 def _write_capacity_block(ws, start_row, title, headers, rows, bold, thin):
@@ -339,6 +495,7 @@ def export_combined_schedule_workbook(
                 (source_heat_wb, "Melt Mgmt Summary", "Melt Summary"),
                 (source_mold_wb, "Mold Mgmt Summary", "Mold Summary"),
                 (source_heat_wb, "Melt Dept Schedule", "Melt Schedule"),
+                (source_heat_wb, "Melt Diagnostics", "Melt Diagnostics"),
                 (source_mold_wb, "Mold Schedule", "Mold Schedule"),
             ]
 
@@ -724,7 +881,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
                 "Mold Type",
                 "Quantity of Molds",
                 "Castings Per Mold",
-                "Cores Per Mold",
+                "Quantity of Cores",
                 "Total Weight per EXT",
                 "# of Molds for EXT",
                 "Heat #",
@@ -1481,7 +1638,8 @@ def export_heat_summary(
     Sheet 1 "Heat Summary"       – day-block melt schedule layout.
     Sheet 2 "Heat Planner"       – planner-facing worksheet with manual fill columns.
     Sheet 3 "Melt Mgmt Summary"  – management view of planned pours.
-    Sheet 4 "Melt Dept Schedule" – melt-department execution schedule.
+    Sheet 4 "Melt Dept Schedule" - melt-department execution schedule.
+    Sheet 5 "Melt Diagnostics"   - skipped pour-day diagnostics and likely causes.
 
     Args:
         melt_schedule: Output of build_melt_schedule.
@@ -2045,6 +2203,69 @@ def export_heat_summary(
         for col, width in melt_dept_widths.items():
             ws_melt_dept.column_dimensions[col].width = width
         _apply_11x17_portrait_layout(ws_melt_dept)
+
+        ws_melt_diag = wb.create_sheet("Melt Diagnostics")
+        melt_diag_headers = [
+            "Skipped Pour Day",
+            "Skipped Pour Date",
+            "Weekday",
+            "Original Heats On Day",
+            "Heats Pushed Later",
+            "Pushed To Pour Days",
+            "Mold Window Days",
+            "Window Line Usage",
+            "Window Floor Usage",
+            "Likely Cause",
+        ]
+        for col_num, header in enumerate(melt_diag_headers, start=1):
+            cell = ws_melt_diag.cell(1, col_num, header)
+            cell.font = bold
+            cell.border = thin
+
+        melt_diag_rows = _build_melt_gap_diagnostics(melt_schedule, day_dates, mold_schedule_frame)
+        diag_row = 2
+        if melt_diag_rows:
+            for row in melt_diag_rows:
+                values = [
+                    row.get("Skipped Pour Day", ""),
+                    row.get("Skipped Pour Date", ""),
+                    row.get("Weekday", ""),
+                    row.get("Original Heats On Day", ""),
+                    row.get("Heats Pushed Later", ""),
+                    row.get("Pushed To Pour Days", ""),
+                    row.get("Mold Window Days", ""),
+                    row.get("Window Line Usage", ""),
+                    row.get("Window Floor Usage", ""),
+                    row.get("Likely Cause", ""),
+                ]
+                for col_num, value in enumerate(values, start=1):
+                    cell = ws_melt_diag.cell(diag_row, col_num, value)
+                    cell.border = thin
+                    if col_num == 2 and value != "":
+                        cell.number_format = "m/d/yyyy"
+                    if col_num == 10:
+                        cell.alignment = Alignment(wrap_text=True, vertical="top")
+                diag_row += 1
+        else:
+            ws_melt_diag.cell(2, 1, "No skipped pour days detected in the current melt schedule range.")
+            ws_melt_diag.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(melt_diag_headers))
+            ws_melt_diag.cell(2, 1).alignment = Alignment(horizontal="left", vertical="center")
+
+        melt_diag_widths = {
+            "A": 15,
+            "B": 15,
+            "C": 11,
+            "D": 20,
+            "E": 18,
+            "F": 20,
+            "G": 15,
+            "H": 18,
+            "I": 18,
+            "J": 70,
+        }
+        for col, width in melt_diag_widths.items():
+            ws_melt_diag.column_dimensions[col].width = width
+        _apply_letter_portrait_layout(ws_melt_diag)
 
         wb.save(output_file)
         print(f"Saved: {output_file}")

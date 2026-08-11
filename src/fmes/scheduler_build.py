@@ -1,28 +1,17 @@
 """
-Schedule-building logic for Foundry Management and Execution System (FMES).
+Schedule-building helpers for the experimental scheduler branch.
 
-Responsibilities:
-  - Split individual jobs into extension-sized work chunks (Expand_Job).
-  - Assign each chunk to a numbered production day while respecting
-    per-day and per-job mold capacity limits (Assign_days).
-  - Attach calendar dates to day numbers, skipping weekends (Build_Schedule_Dates).
-  - Assign heat numbers within each day based on alloy changes and
-    the 2,300-lb heat weight limit (Build_Daily_Schedules).
+Current responsibilities:
+- Normalize jobs into scheduler-ready rows.
+- Build a weekday-only calendar mapping for schedule day numbers.
 """
 
 import math
-import string
 from datetime import timedelta
 
 import pandas as pd
 
-from .config import Columns, DailyMoldLimits
-from .melt_planning import HEAT_WEIGHT_LIMIT_LBS, MAX_PLANNED_HEATS_PER_DAY, assign_heat_numbers
-
-
-EXTENSION_WEIGHT_LIMIT_LBS = 2300
-EXTENSION_MOLD_LIMIT = 10
-_EXTENSION_ALPHABET = [ch for ch in string.ascii_uppercase if ch != "L"]
+from .config import Columns
 
 
 def _safe_int(value, default=0):
@@ -35,175 +24,25 @@ def _safe_int(value, default=0):
         return default
 
 
-def get_extensions(num_splits):
-    """
-    Generate extension labels for a job split into num_splits chunks.
-
-    A single-chunk job has no label ("").  Multi-chunk jobs get alphabetical
-    labels (A, B, C …) with the final chunk labeled "L" (Last).
-
-    Examples:
-        get_extensions(1) -> [""]
-        get_extensions(3) -> ["A", "B", "L"]
-    """
-    if num_splits == 1:
-        return [""]
-
-    extensions = []
-
-    def _label_for_index(index):
-        """Return a rollover label (A..Z without L, then AA, AB, ...)."""
-        if index < 0:
-            raise ValueError("index must be non-negative")
-
-        base = len(_EXTENSION_ALPHABET)
-        value = index + 1
-        label_parts = []
-
-        while value > 0:
-            value, remainder = divmod(value - 1, base)
-            label_parts.append(_EXTENSION_ALPHABET[remainder])
-
-        return "".join(reversed(label_parts))
-
-    for i in range(num_splits - 1):
-        extensions.append(_label_for_index(i))
-
-    extensions.append("L")
-    return extensions
-
-
-def get_daily_mold_limit(job):
-    """
-    Return the maximum molds this job may contribute to a single production day.
-
-    Floor jobs (casting type F) and heavy jobs (pour weight > 300 lbs) are
-    limited to 3 molds per day.  All other line jobs are limited to 6.
-    """
-    pour_weight = job[Columns.COL_POUR_WEIGHT]
-
-    if pour_weight > 300:
-        return 3
-
-    casting_type = str(job[Columns.COL_CAST_TYPE]).upper()
-
-    if casting_type == "F":
-        return 3
-
-    return 6
-
-
-def get_extension_mold_limit(job):
-    """
-    Return the maximum molds allowed in a single extension for this job.
-
-    Calculated as the lesser of EXTENSION_MOLD_LIMIT (10) and the number of
-    molds whose combined pour weight fits within EXTENSION_WEIGHT_LIMIT_LBS
-    (2,300 lbs).  Always at least 1.
-    """
-    pour_weight = float(job.get(Columns.COL_POUR_WEIGHT, 0) or 0)
-
-    if pour_weight <= 0:
-        max_by_weight = EXTENSION_MOLD_LIMIT
-    else:
-        max_by_weight = int(EXTENSION_WEIGHT_LIMIT_LBS // pour_weight)
-        max_by_weight = max(max_by_weight, 1)
-
-    return min(max_by_weight, EXTENSION_MOLD_LIMIT)
-
-
-def _build_remaining_extension_plan(total_molds, completed_molds, extension_limit):
-    """
-    Build the list of extensions still needed after accounting for completed molds.
-
-    The full job is divided into extension-sized chunks labeled by get_extensions().
-    Any chunk that is already fully covered by completed_molds is skipped.  The
-    first partially completed chunk is trimmed to its remaining count.
-
-    Returns:
-        list of (seq, ext_label, molds_remaining) tuples.
-    """
-    total_molds = max(total_molds, 0)
-    completed_molds = max(completed_molds, 0)
-
-    if total_molds <= 0:
-        return []
-
-    total_splits = math.ceil(total_molds / extension_limit)
-    extensions = get_extensions(total_splits)
-
-    chunk_sizes = []
-    molds_remaining = total_molds
-    for _ in extensions:
-        chunk = min(extension_limit, molds_remaining)
-        chunk_sizes.append(chunk)
-        molds_remaining -= chunk
-
-    remaining_plan = []
-    molds_completed_left = completed_molds
-
-    for seq, ext in enumerate(extensions):
-        chunk_size = chunk_sizes[seq]
-
-        if molds_completed_left >= chunk_size:
-            molds_completed_left -= chunk_size
-            continue
-
-        remaining_for_ext = chunk_size - molds_completed_left
-        molds_completed_left = 0
-
-        if remaining_for_ext > 0:
-            remaining_plan.append((seq, ext, remaining_for_ext))
-
-    return remaining_plan
-
-
 def expand_job(job):
     """
-    Expand a single job into one or more extension rows ready for day assignment.
+    Build a single scheduler row for one job (no extension splitting).
 
-    Each returned row is a copy of the original job dict augmented with:
-      EXT               – extension label ("", "A", "B", … "L")
-      Extension_Seq     – zero-based ordinal position of this extension
-      Molds for EXT     – mold count assigned to this extension
-      Total Weight per EXT – combined pour weight for this extension
-
-    Raises:
-        RuntimeError: Wraps any unexpected exception with the job number.
+    This branch intentionally removes extension chunking. The returned row keeps
+    compatible export columns so report formatting code continues to work.
     """
     try:
         molds_needed = _safe_int(job[Columns.COL_MOLDS_NEEDED], default=0)
-        molds_completed = _safe_int(job.get("Molds Completed", 0), default=0)
-        extension_limit = get_extension_mold_limit(job)
-        total_molds = molds_needed + molds_completed
+        if molds_needed <= 0:
+            return []
 
-        extension_plan = _build_remaining_extension_plan(
-            total_molds=total_molds,
-            completed_molds=molds_completed,
-            extension_limit=extension_limit,
-        )
-
-        rows = []
-        molds_remaining = molds_needed
-
-        for seq, ext, planned_molds in extension_plan:
-            if molds_remaining <= 0:
-                break
-
-            molds_for_ext = min(planned_molds, molds_remaining)
-            if molds_for_ext <= 0:
-                continue
-
-            row = job.copy()
-            row["EXT"] = ext
-            row["Extension_Seq"] = seq
-            row["Molds for EXT"] = molds_for_ext
-            pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
-            row["Total Weight per EXT"] = molds_for_ext * max(pour_weight, 0)
-            rows.append(row)
-            molds_remaining -= molds_for_ext
-
-        return rows
+        row = job.copy()
+        row["EXT"] = ""
+        row["Extension_Seq"] = 0
+        row["Molds for EXT"] = molds_needed
+        pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
+        row["Total Weight per EXT"] = molds_needed * max(pour_weight, 0)
+        return [row]
     except Exception as exc:
         raise RuntimeError(
             f"Failed while expanding job {job.get(Columns.COL_JOB_NUMBER, '<unknown>')}"
@@ -211,339 +50,14 @@ def expand_job(job):
 
 
 def build_schedule_rows(jobs_to_schedule):
-    """
-    Expand every job in jobs_to_schedule into extension rows.
-
-    Args:
-        jobs_to_schedule: Iterable of job dicts (one per row from the filtered DataFrame).
-
-    Returns:
-        list of dicts – all extension rows for all jobs combined.
-    """
+    """Build scheduler rows for every eligible job."""
     try:
         schedule_rows = []
-
         for job in jobs_to_schedule:
             schedule_rows.extend(expand_job(job))
-
         return schedule_rows
     except Exception as exc:
         raise RuntimeError("Failed while building schedule rows") from exc
-
-
-def is_f_job(job):
-    """Return True if the job belongs in the floor (F) mold bucket.
-
-    Bucket assignment is by casting type only. Heavy line jobs keep their
-    3-molds-per-day job limit via get_daily_mold_limit but consume line capacity.
-    """
-    return str(job[Columns.COL_CAST_TYPE]).upper() == "F"
-
-
-def assign_days(schedule_df):
-    """
-    Assign each extension row to a numbered production day.
-
-    Iterates rows in their sorted order and greedily fills the current day.
-    When a day is full (either the global bucket cap or the per-job daily cap
-    is reached) the algorithm advances to the next day.  A single extension
-    may be split across multiple days.
-
-    Adds a 'Schedule Day' column (1-based int) to each allocated row.
-
-    Returns:
-        DataFrame of allocated rows with 'Schedule Day' populated.
-    """
-    try:
-        day_usage = {}
-        job_last_day = {}
-        job_usage = {}
-        allocated_rows = []
-
-        for _, row in schedule_df.iterrows():
-            molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
-            if molds_remaining <= 0:
-                continue
-
-            bucket = "F" if is_f_job(row) else "L"
-            job_num = row[Columns.COL_JOB_NUMBER]
-            day = job_last_day.get(job_num, 1)
-            per_job_daily_limit = get_daily_mold_limit(row)
-
-            while molds_remaining > 0:
-                if day not in day_usage:
-                    day_usage[day] = {"L": 0, "F": 0}
-
-                if day not in job_usage:
-                    job_usage[day] = {}
-
-                if job_num not in job_usage[day]:
-                    job_usage[day][job_num] = {"L": 0, "F": 0}
-
-                capacity = (
-                    DailyMoldLimits.MAX_F_MOLDS_PER_DAY
-                    if bucket == "F"
-                    else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
-                )
-
-                available_day_capacity = capacity - day_usage[day][bucket]
-                available_job_capacity = per_job_daily_limit - job_usage[day][job_num][bucket]
-                molds_for_day = min(
-                    molds_remaining,
-                    available_day_capacity,
-                    available_job_capacity,
-                )
-
-                if molds_for_day > 0:
-                    row_for_day = row.copy()
-                    row_for_day["Molds for EXT"] = molds_for_day
-                    pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
-                    row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
-                    row_for_day["Schedule Day"] = day
-                    allocated_rows.append(row_for_day)
-
-                    day_usage[day][bucket] += molds_for_day
-                    job_usage[day][job_num][bucket] += molds_for_day
-                    job_last_day[job_num] = day
-                    molds_remaining -= molds_for_day
-
-                if molds_remaining > 0:
-                    # Spill remaining molds for this extension into the next day.
-                    day += 1
-
-        return pd.DataFrame(allocated_rows)
-    except Exception as exc:
-        raise RuntimeError("Failed while assigning schedule days") from exc
-
-
-def _heat_minimum_mold_days(heat_rows):
-    """Return the minimum molding days a heat needs under bucket and job caps."""
-    bucket_totals = {"L": 0, "F": 0}
-    job_totals = {}
-    job_limits = {}
-
-    for row in heat_rows:
-        molds = _safe_int(row.get("Molds for EXT", 0), default=0)
-        if molds <= 0:
-            continue
-        bucket = "F" if is_f_job(row) else "L"
-        job_key = (row[Columns.COL_JOB_NUMBER], bucket)
-        bucket_totals[bucket] += molds
-        job_totals[job_key] = job_totals.get(job_key, 0) + molds
-        job_limits[job_key] = get_daily_mold_limit(row)
-
-    days_needed = 1
-    if bucket_totals["L"] > 0:
-        days_needed = max(
-            days_needed,
-            math.ceil(bucket_totals["L"] / DailyMoldLimits.MAX_L_MOLDS_PER_DAY),
-        )
-    if bucket_totals["F"] > 0:
-        days_needed = max(
-            days_needed,
-            math.ceil(bucket_totals["F"] / DailyMoldLimits.MAX_F_MOLDS_PER_DAY),
-        )
-    for job_key, molds in job_totals.items():
-        days_needed = max(days_needed, math.ceil(molds / max(job_limits[job_key], 1)))
-
-    return days_needed
-
-
-def _try_place_heat_molds(heat_rows, pour_day, window_days_count, day_usage, job_usage):
-    """
-    Tentatively place a heat's molds in the days just before pour_day.
-
-    Returns a list of (day, row, molds) placements, or None when the window
-    cannot hold every mold in the heat.
-    """
-    window_days = list(range(max(1, pour_day - window_days_count), pour_day))
-    if not window_days:
-        return None
-
-    temp_day = {day: dict(day_usage.get(day, {"L": 0, "F": 0})) for day in window_days}
-    temp_job = {
-        day: {job: dict(buckets) for job, buckets in job_usage.get(day, {}).items()}
-        for day in window_days
-    }
-    placements = []
-
-    for row in heat_rows:
-        molds_remaining = _safe_int(row.get("Molds for EXT", 0), default=0)
-        if molds_remaining <= 0:
-            continue
-
-        bucket = "F" if is_f_job(row) else "L"
-        job_num = row[Columns.COL_JOB_NUMBER]
-        per_job_daily_limit = get_daily_mold_limit(row)
-        capacity = (
-            DailyMoldLimits.MAX_F_MOLDS_PER_DAY
-            if bucket == "F"
-            else DailyMoldLimits.MAX_L_MOLDS_PER_DAY
-        )
-
-        # Fill earliest available mold days first to preserve extension chronology.
-        for day in window_days:
-            if molds_remaining <= 0:
-                break
-            job_buckets = temp_job[day].setdefault(job_num, {"L": 0, "F": 0})
-            available = min(
-                capacity - temp_day[day][bucket],
-                per_job_daily_limit - job_buckets[bucket],
-            )
-            molds_for_day = min(molds_remaining, max(available, 0))
-            if molds_for_day > 0:
-                placements.append((day, row, molds_for_day))
-                temp_day[day][bucket] += molds_for_day
-                job_buckets[bucket] += molds_for_day
-                molds_remaining -= molds_for_day
-
-        if molds_remaining > 0:
-            return None
-
-    return placements
-
-
-def assign_mold_days_from_heat_plan(planned_rows):
-    """
-    Back-fill molding days from an authoritative heat plan.
-
-    Heats keep their planned grouping and order. Each heat's molds are placed
-    on available days before its pour, back-scheduling as far as needed to
-    satisfy mold capacity constraints while preserving grouped heat pours.
-    When nearby mold capacity is full, the algorithm expands farther backward
-    before deciding to push a pour day later.
-
-    Returns:
-        tuple[pd.DataFrame, int]: allocated mold rows carrying the final
-        'Pour Schedule Day' plus 'Original Pour Schedule Day', and a day
-        offset (always 0 because mold days never start before day 1).
-    """
-    try:
-        if planned_rows.empty:
-            return pd.DataFrame(), 0
-
-        planned_rows = planned_rows.copy().sort_values(
-            by=[
-                "Pour Schedule Day",
-                "Planning Priority Rank",
-                "Due Date Sort",
-                "Heat #",
-                Columns.COL_JOB_NUMBER,
-                "Extension_Seq",
-            ],
-            ascending=[True, True, True, True, True, True],
-            na_position="last",
-        )
-
-        day_usage = {}
-        job_usage = {}
-        pours_per_day = {}
-        allocated_rows = []
-        last_pour_day = 0
-
-        for (original_pour_day, heat_number), heat_df in planned_rows.groupby(
-            ["Pour Schedule Day", "Heat #"], sort=True
-        ):
-            heat_rows = [row for _, row in heat_df.iterrows()]
-            minimum_days_needed = _heat_minimum_mold_days(heat_rows)
-
-            min_days_until_due = pd.to_numeric(
-                heat_df.get("Days Until Due", pd.Series(dtype="float64")),
-                errors="coerce",
-            ).dropna()
-            no_time_exception = (
-                not min_days_until_due.empty
-                and float(min_days_until_due.min()) < 14
-            )
-
-            if no_time_exception:
-                # If due date runway is already below two weeks, pour at the
-                # earliest feasible slot and back-schedule molds immediately.
-                pour_day = max(last_pour_day, 2)
-            else:
-                pour_day = max(_safe_int(original_pour_day, default=1), last_pour_day, 2)
-            placements = None
-            for _ in range(3660):  # hard stop so a bad input cannot loop forever
-                if pours_per_day.get(pour_day, 0) >= MAX_PLANNED_HEATS_PER_DAY:
-                    pour_day += 1
-                    continue
-
-                # Back-schedule molds using the full runway before pour day.
-                window_days_count = max(pour_day - 1, minimum_days_needed)
-                placements = _try_place_heat_molds(
-                    heat_rows, pour_day, window_days_count, day_usage, job_usage
-                )
-                if placements is not None:
-                    break
-                pour_day += 1
-
-            if placements is None:
-                raise RuntimeError(
-                    f"Could not place molds for heat {heat_number} within the search horizon"
-                )
-
-            for day, row, molds_for_day in placements:
-                bucket = "F" if is_f_job(row) else "L"
-                job_num = row[Columns.COL_JOB_NUMBER]
-                day_usage.setdefault(day, {"L": 0, "F": 0})[bucket] += molds_for_day
-                job_usage.setdefault(day, {}).setdefault(job_num, {"L": 0, "F": 0})[bucket] += molds_for_day
-
-                row_for_day = row.copy()
-                row_for_day["Molds for EXT"] = molds_for_day
-                pour_weight = float(row.get(Columns.COL_POUR_WEIGHT, 0) or 0)
-                row_for_day["Total Weight per EXT"] = molds_for_day * max(pour_weight, 0)
-                row_for_day["Schedule Day"] = day
-                row_for_day["Original Pour Schedule Day"] = _safe_int(original_pour_day, default=1)
-                row_for_day["Pour Schedule Day"] = pour_day
-                allocated_rows.append(row_for_day)
-
-            pours_per_day[pour_day] = pours_per_day.get(pour_day, 0) + 1
-            last_pour_day = pour_day
-
-        return pd.DataFrame(allocated_rows), 0
-    except Exception as exc:
-        raise RuntimeError("Failed while back-filling mold days from heat plan") from exc
-
-
-def print_bucket(Schedule_Data_Frame):
-    """Print a per-day summary of L and F mold counts versus daily limits."""
-    for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):
-        day_rows = Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
-        l_molds = day_rows[~day_rows.apply(is_f_job, axis=1)]["Molds for EXT"].sum()
-        f_molds = day_rows[day_rows.apply(is_f_job, axis=1)]["Molds for EXT"].sum()
-
-        print(
-            f"Day {day}: "
-            f"L={l_molds}/{DailyMoldLimits.MAX_L_MOLDS_PER_DAY}, "
-            f"F={f_molds}/{DailyMoldLimits.MAX_F_MOLDS_PER_DAY}"
-        )
-
-
-def build_daily_schedules(Schedule_Data_Frame):
-    """
-    Group the allocated schedule by day and assign heat numbers within each day.
-
-    Rows within a day are sorted by alloy then job number.  A new heat starts
-    whenever the alloy changes or adding the next row's weight would exceed
-    HEAT_WEIGHT_LIMIT_LBS (2,300 lbs).
-
-    Returns:
-        dict mapping day number (int) -> DataFrame with a 'Heat #' column added.
-    """
-    try:
-        daily_schedules = {}
-
-        for day in sorted(Schedule_Data_Frame["Schedule Day"].unique()):
-            day_df = (
-                Schedule_Data_Frame[Schedule_Data_Frame["Schedule Day"] == day]
-                .copy()
-                .sort_values(by=[Columns.COL_ALLOY, Columns.COL_JOB_NUMBER])
-            )
-            daily_schedules[day] = assign_heat_numbers(day_df)
-
-        return daily_schedules
-    except Exception as exc:
-        raise RuntimeError("Failed while building daily schedules") from exc
 
 
 def build_schedule_dates(daily_schedules, start_date):
@@ -551,11 +65,11 @@ def build_schedule_dates(daily_schedules, start_date):
     Map each schedule day number to a real calendar date, skipping weekends.
 
     Args:
-        daily_schedules: Dict keyed by day number (output of Build_Daily_Schedules).
-        start_date:      datetime for the first production day (typically tomorrow).
+        daily_schedules: Dict keyed by day number.
+        start_date: datetime for the first production day.
 
     Returns:
-        dict mapping day number -> {'date': date, 'weekday': weekday name string}.
+        dict mapping day number -> {"date": date, "weekday": weekday name}.
     """
     try:
         day_dates = {}

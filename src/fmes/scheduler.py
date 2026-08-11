@@ -1,15 +1,13 @@
 """
 FMES scheduling entry point.
 
-Orchestrates the full scheduling pipeline:
+Experimental orchestration pipeline for branch-level scheduling redesign:
     1. Read the Open Order Report from Excel.
     2. Filter jobs eligible for mold scheduling.
-    3. Expand jobs into extension-sized work chunks.
+    3. Normalize jobs into scheduler rows.
     4. Prioritize rows for review and scheduling by due date.
-    5. Build a heat-first pour plan.
-    6. Back-fill the mold schedule from planned heats.
-    7. Map mold days to dates, then map pour days to the next production date.
-    8. Return export blocks plus the planner data needed for heat exports.
+    5. Stop at sorted/optimized alloy-group rows and seed export-facing data.
+    6. Keep Excel export formatting/report generation intact.
 
 Import schedule_molds() from fmes.main or tests.
 """
@@ -22,16 +20,12 @@ import pandas as pd
 
 from .config import Columns
 from .scheduler_build import (
-    assign_mold_days_from_heat_plan,
     build_schedule_dates,
     build_schedule_rows,
-    print_bucket,
 )
 from .melt_planning import (
     PRIORITY_REVIEW_WINDOW_DAYS,
-    build_melt_schedule,
     prioritize_schedule_rows,
-    rebuild_melt_schedule_from_planned_rows,
 )
 
 from .scheduler_export import (
@@ -45,6 +39,27 @@ from .scheduler_io import read_file, sync_open_order_report_with_sql
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_seed_melt_schedule_from_sorted_groups(sorted_rows):
+    """Return a minimal melt schedule seeded directly from sorted alloy groups."""
+    if sorted_rows is None or sorted_rows.empty:
+        return {}
+
+    seed_rows = sorted_rows.copy()
+    seed_rows["Pour Schedule Day"] = 1
+
+    if "Heat #" not in seed_rows.columns:
+        seed_rows["Heat #"] = ""
+    if "Global Heat #" not in seed_rows.columns:
+        seed_rows["Global Heat #"] = ""
+
+    return {
+        1: {
+            "rows": seed_rows,
+            "heat_summary": pd.DataFrame(),
+        }
+    }
 
 
 def schedule_molds():
@@ -87,9 +102,9 @@ def schedule_molds():
         jobs_to_schedule = mold_scheduler(input_file)
         logger.info("      %s jobs selected for scheduling.", len(jobs_to_schedule))
 
-        logger.info("      Expanding jobs into extensions...")
+        logger.info("      Normalizing jobs into scheduler rows...")
         schedule_rows = build_schedule_rows(jobs_to_schedule)
-        logger.info("      %s extension rows created.", len(schedule_rows))
+        logger.info("      %s scheduler rows created.", len(schedule_rows))
 
         schedule_data_frame = pd.DataFrame(schedule_rows)
         schedule_data_frame = (
@@ -118,41 +133,11 @@ def schedule_molds():
             len(schedule_data_frame),
         )
 
-        logger.info("      Building heat-first pour plan...")
-        melt_schedule = build_melt_schedule(schedule_data_frame)
-
-        planned_heat_rows = pd.concat(
-            [day_plan["rows"] for day_plan in melt_schedule.values()],
-            ignore_index=True,
-        ) if melt_schedule else pd.DataFrame()
-
-        logger.info("      Back-filling mold schedule from planned heats...")
-        mold_schedule_frame, _ = assign_mold_days_from_heat_plan(planned_heat_rows)
-        melt_schedule, mold_schedule_frame = rebuild_melt_schedule_from_planned_rows(mold_schedule_frame)
-
-        if not mold_schedule_frame.empty and "Schedule Day" in mold_schedule_frame.columns:
-            logger.info(
-                "Day Totals\n%s",
-                mold_schedule_frame.groupby("Schedule Day")["Molds for EXT"].sum(),
-            )
-            logger.debug(
-                "Back-filled mold rows\n%s",
-                mold_schedule_frame[
-                    [
-                        Columns.COL_JOB_NUMBER,
-                        "EXT",
-                        Columns.COL_ALLOY,
-                        "Molds for EXT",
-                        "Schedule Day",
-                        "Pour Schedule Day",
-                    ]
-                ],
-            )
-            print_bucket(mold_schedule_frame)
-            mold_days = sorted(int(day) for day in mold_schedule_frame["Schedule Day"].unique())
-        else:
-            logger.info("      No mold rows were back-filled from planned heats.")
-            mold_days = []
+        logger.info("      Experimental mode: stopping after sorted/optimized alloy groups.")
+        logger.info("      Seeding export data from prioritized rows (no melt assignment/backfill yet).")
+        melt_schedule = _build_seed_melt_schedule_from_sorted_groups(schedule_data_frame)
+        mold_schedule_frame = pd.DataFrame()
+        mold_days = []
 
         pour_days = sorted(int(day) for day in melt_schedule.keys())
         all_days = mold_days + pour_days

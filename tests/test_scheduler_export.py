@@ -531,7 +531,7 @@ class SchedulerExportTests(unittest.TestCase):
             wb = load_workbook(output_file)
             self.assertEqual(
                 wb.sheetnames,
-                ["Heat Summary", "Heat Planner", "Melt Mgmt Summary", "Melt Dept Schedule"],
+                ["Heat Summary", "Heat Planner", "Melt Mgmt Summary", "Melt Dept Schedule", "Melt Diagnostics"],
             )
             ws = wb["Heat Summary"]
             self.assertEqual(ws.cell(1, 1).value, "Heat Schedule")
@@ -593,6 +593,14 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertNotEqual(
                 ws_melt_dept.cell(2, 1).fill.start_color.rgb,
                 ws_melt_dept.cell(3, 1).fill.start_color.rgb,
+            )
+
+            ws_melt_diag = wb["Melt Diagnostics"]
+            self.assertEqual(ws_melt_diag.cell(1, 1).value, "Skipped Pour Day")
+            self.assertEqual(ws_melt_diag.cell(1, 10).value, "Likely Cause")
+            self.assertEqual(
+                ws_melt_diag.cell(2, 1).value,
+                "No skipped pour days detected in the current melt schedule range.",
             )
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
@@ -700,6 +708,7 @@ class SchedulerExportTests(unittest.TestCase):
                     "Melt Summary",
                     "Mold Summary",
                     "Melt Schedule",
+                    "Melt Diagnostics",
                     "Mold Schedule",
                 ],
             )
@@ -707,6 +716,7 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(wb["Melt Summary"].cell(1, 1).value, "Pour Date")
             self.assertEqual(wb["Mold Summary"].cell(1, 1).value, "Job Number")
             self.assertEqual(wb["Melt Schedule"].cell(1, 1).value, "Pour Date")
+            self.assertEqual(wb["Melt Diagnostics"].cell(1, 1).value, "Skipped Pour Day")
             self.assertEqual(wb["Mold Schedule"].cell(1, 1).value, "Mold Schedule")
 
     def test_build_heat_daily_totals_rows(self):
