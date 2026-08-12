@@ -490,12 +490,19 @@ def export_combined_schedule_workbook(
             combined_wb = Workbook()
             combined_wb.remove(combined_wb.active)
 
+            mold_summary_source = (
+                "Job Shipping Outlook"
+                if "Job Shipping Outlook" in source_mold_wb.sheetnames
+                else "Overall Job Status"
+            )
+
             sheet_plan = [
                 (source_mold_wb, "Overall Job Status", "Overall Summary"),
-                (source_heat_wb, "Melt Mgmt Summary", "Melt Summary"),
                 (source_heat_wb, "Melt Dept Schedule", "Melt Schedule"),
                 (source_heat_wb, "Melt Diagnostics", "Melt Diagnostics"),
                 (source_mold_wb, "Mold Schedule", "Mold Schedule"),
+                (source_heat_wb, "Melt Mgmt Summary", "Melt Summary"),
+                (source_mold_wb, mold_summary_source, "Mold Summary"),
             ]
 
             for source_wb, source_name, target_name in sheet_plan:
@@ -648,7 +655,7 @@ def build_job_shipping_report_rows(
     return rows
 
 
-def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
+def build_daily_export_blocks(daily_schedules, day_dates, pour_day_dates=None):
     """
     Combine daily schedule DataFrames with their calendar dates into export blocks.
 
@@ -663,7 +670,7 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
     try:
         export_blocks = {}
 
-        for day, df in Daily_Schedules.items():
+        for day, df in daily_schedules.items():
             df = df.copy()
             if "Heat #" not in df.columns:
                 df["Heat #"] = ""
@@ -678,7 +685,7 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
                 na_position="last",
             ).reset_index(drop=True)
 
-            mold_day = Day_Dates[day]
+            mold_day = day_dates[day]
 
             def _resolve_pour_day_value(row):
                 pour_day = row.get("Pour Schedule Day", "")
@@ -721,8 +728,8 @@ def build_daily_export_blocks(Daily_Schedules, Day_Dates, pour_day_dates=None):
             mold_total = df["Molds for EXT"].fillna(0).sum()
 
             export_blocks[day] = {
-                "date": Day_Dates[day]["date"],
-                "weekday": Day_Dates[day]["weekday"],
+                "date": day_dates[day]["date"],
+                "weekday": day_dates[day]["weekday"],
                 "rows": df[
                     [
                         Columns.COL_DUE_DATE,
@@ -837,56 +844,6 @@ def build_excel_rows(export_blocks):
     return excel_rows
 
 
-def _build_simple_melt_dept_rows(melt_schedule, day_dates):
-    """Return simplified pour-planning rows for the melt department sheet."""
-    if not melt_schedule:
-        return []
-
-    melt_dept_rows = []
-    for day in sorted(melt_schedule.keys()):
-        day_rows = melt_schedule[day].get("rows", pd.DataFrame()).copy()
-        if day_rows.empty:
-            continue
-
-        for _, planned_row in day_rows.iterrows():
-            job_number = str(planned_row.get(Columns.COL_JOB_NUMBER, "") or "").strip()
-            alloy = str(planned_row.get(Columns.COL_ALLOY, "") or "").strip()
-            customer_name = str(planned_row.get("Customer Name", "") or "").strip()
-            heat_number = planned_row.get("Heat #", "")
-            row_molds = float(pd.to_numeric(planned_row.get("Molds for EXT", 0), errors="coerce") or 0)
-            row_weight = float(pd.to_numeric(planned_row.get("Total Weight per EXT", 0), errors="coerce") or 0)
-            melt_dept_rows.append(
-                {
-                    "Pour Date": _normalize_due_date(day_dates.get(day, {}).get("date", pd.NaT)),
-                    "Weekday": day_dates.get(day, {}).get("weekday", ""),
-                    "Heat #": heat_number,
-                    "Alloy": alloy,
-                    "Job Number": job_number,
-                    "Molds on Floor": row_molds,
-                    "Pour Weight Required (lbs)": row_weight,
-                    "Customer Name": customer_name,
-                }
-            )
-
-    if not melt_dept_rows:
-        return []
-
-    grouped = pd.DataFrame(melt_dept_rows)
-    grouped["Molds on Floor"] = pd.to_numeric(grouped["Molds on Floor"], errors="coerce").fillna(0)
-    grouped["Pour Weight Required (lbs)"] = pd.to_numeric(grouped["Pour Weight Required (lbs)"], errors="coerce").fillna(0)
-    grouped = grouped.groupby(
-        ["Pour Date", "Weekday", "Heat #", "Alloy", "Job Number", "Customer Name"],
-        dropna=False,
-        as_index=False,
-    ).agg(
-        **{
-            "Molds on Floor": ("Molds on Floor", "sum"),
-            "Pour Weight Required (lbs)": ("Pour Weight Required (lbs)", "sum"),
-        }
-    )
-    return grouped.to_dict(orient="records")
-
-
 def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, created_on):
     """Write melt rows grouped by pour day in the same day-block style as the mold schedule."""
     current_row = 5
@@ -911,7 +868,7 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
         "Job Number",
         "Molds on Floor",
         "Pour Weight Required (lbs)",
-        "Customer Name",
+        "Part Number",
     ]
 
     for day in sorted(melt_schedule.keys()):
@@ -954,7 +911,7 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
                 str(planned_row.get(Columns.COL_JOB_NUMBER, "") or "").strip(),
                 molds_numeric,
                 weight_numeric,
-                str(planned_row.get("Customer Name", "") or "").strip(),
+                str(planned_row.get("Part Number", "") or "").strip(),
             ]
             for col_num, value in enumerate(values, start=1):
                 cell = ws.cell(current_row, col_num, value)
@@ -985,7 +942,268 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
     _apply_11x17_portrait_layout(ws)
 
 
-def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_shipping_rows=None, melt_schedule=None, day_dates=None):
+def _write_mold_schedule_sheet(ws, export_blocks, created_on, bold, thin):
+    """Write the Mold Schedule worksheet day blocks and totals."""
+    total_molds = sum(float(block.get("mold_total", 0) or 0) for block in export_blocks.values())
+    avg_molds_per_day = total_molds / max(len(export_blocks), 1)
+
+    _write_schedule_banner(
+        ws,
+        "Mold Schedule",
+        created_on,
+        "Average Molds / Day",
+        f"{avg_molds_per_day:,.1f}",
+        10,
+    )
+
+    current_row = 5
+    day_title_fill = REPORT_HEADER_FILL
+
+    for day in sorted(export_blocks.keys()):
+        block = export_blocks[day]
+
+        ws.cell(current_row, 1, "Mold Schedule")
+        ws.cell(current_row, 2, block["date"].strftime("%m/%d/%Y"))
+        ws.cell(current_row, 4, block["weekday"])
+
+        for col in range(1, 11):
+            ws.cell(current_row, col).font = bold
+            ws.cell(current_row, col).fill = day_title_fill
+
+        ws.row_dimensions[current_row].height = 20
+        current_row += 2
+
+        headers = [
+            "Customer Name",
+            "Part Number",
+            "Job Number",
+            "EXT",
+            "Alloy",
+            "Mold Type",
+            "Quantity of Molds",
+            "Quantity of Cores",
+            "Total Weight",
+            "Number of Molds Today",
+        ]
+
+        for col_num, header in enumerate(headers, start=1):
+            cell = ws.cell(current_row, col_num, header)
+            cell.border = thin
+            cell.font = bold
+
+        _apply_schedule_day_header(ws, current_row, len(headers))
+        current_row += 1
+
+        for _, row in block["rows"].iterrows():
+            values = [
+                row.get("Customer Name", ""),
+                row.get("Part Number", ""),
+                row.get(Columns.COL_JOB_NUMBER, ""),
+                row.get("EXT", ""),
+                row.get(Columns.COL_ALLOY, ""),
+                row.get(Columns.COL_CAST_TYPE, ""),
+                row.get("Quantity of Molds", ""),
+                row.get("Quantity of Cores", ""),
+                _resolve_column_value(row, "Total Weight", "Total Weight per EXT"),
+                _resolve_column_value(row, "Number of Molds Today", "# of Molds Today", "Molds for EXT"),
+            ]
+
+            for col_num, value in enumerate(values, start=1):
+                cell = ws.cell(current_row, col_num, value)
+                cell.border = thin
+                cell.fill = REPORT_SEPARATOR_FILL
+
+            current_row += 1
+
+        ws.cell(current_row, 1, "TOTALS")
+        ws.cell(current_row, 9, block["weight_total"])
+        ws.cell(current_row, 10, block["mold_total"])
+        _apply_schedule_total_row(ws, current_row, [1, 9, 10])
+        current_row += 4
+
+    widths = {
+        "A": 20,
+        "B": 13,
+        "C": 11,
+        "D": 11,
+        "E": 10,
+        "F": 5,
+        "G": 10,
+        "H": 10,
+        "I": 13,
+        "J": 11,
+    }
+
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    _apply_11x17_portrait_layout(ws)
+
+
+def _write_job_shipping_outlook_sheet(ws_jobs, job_shipping_rows, bold, thin, fill_green, fill_yellow, fill_orange, fill_red, fill_gray):
+    """Write the Job Shipping Outlook worksheet."""
+    headers = [
+        "Job Number",
+        "Schedule Status",
+        "Planned Molds",
+        "Scheduled Molds",
+        "Mold Day",
+        "Mold Date",
+        "Pour Day",
+        "Pour Date",
+        "Expected Ship Date",
+        "Due Date",
+        "Ship Buffer Days",
+        "On-Time",
+    ]
+
+    for col_num, header in enumerate(headers, start=1):
+        cell = ws_jobs.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    row_num = 2
+    for row in job_shipping_rows:
+        values = [
+            row.get("Job Number", ""),
+            row.get("Schedule Status", ""),
+            row.get("Planned Molds", ""),
+            row.get("Scheduled Molds", ""),
+            row.get("Mold Day", ""),
+            row.get("Mold Date", ""),
+            row.get("Pour Day", ""),
+            row.get("Pour Date", ""),
+            row.get("Expected Ship Date", ""),
+            row.get("Due Date", ""),
+            row.get("Ship Buffer Days", ""),
+            row.get("On-Time", ""),
+        ]
+
+        for col_num, value in enumerate(values, start=1):
+            cell = ws_jobs.cell(row_num, col_num, value)
+            cell.border = thin
+            if col_num in {6, 8, 9, 10} and value != "":
+                cell.number_format = "m/d/yyyy"
+
+        schedule_status = str(row.get("Schedule Status", "")).strip().upper()
+        on_time = str(row.get("On-Time", "")).strip().upper()
+        buffer_value = row.get("Ship Buffer Days", None)
+
+        if schedule_status == "SCHEDULED":
+            ws_jobs.cell(row_num, 2).fill = fill_green
+        elif schedule_status == "PARTIALLY SCHEDULED":
+            ws_jobs.cell(row_num, 2).fill = fill_yellow
+        elif schedule_status == "NOT YET SCHEDULED":
+            ws_jobs.cell(row_num, 2).fill = fill_orange
+
+        if on_time == "YES":
+            ws_jobs.cell(row_num, 12).fill = fill_green
+        elif on_time == "NO":
+            ws_jobs.cell(row_num, 12).fill = fill_red
+        elif on_time == "NOT SCHEDULED":
+            ws_jobs.cell(row_num, 12).fill = fill_orange
+        else:
+            ws_jobs.cell(row_num, 12).fill = fill_gray
+
+        try:
+            if buffer_value is None or pd.isna(buffer_value):
+                ws_jobs.cell(row_num, 11).fill = fill_gray
+            else:
+                buffer_days = int(buffer_value)
+                if buffer_days < 0:
+                    ws_jobs.cell(row_num, 11).fill = fill_red
+                elif buffer_days < 4:
+                    ws_jobs.cell(row_num, 11).fill = fill_yellow
+                else:
+                    ws_jobs.cell(row_num, 11).fill = fill_green
+        except (TypeError, ValueError):
+            ws_jobs.cell(row_num, 11).fill = fill_gray
+
+        row_num += 1
+
+    widths = {
+        "A": 12,
+        "B": 18,
+        "C": 12,
+        "D": 13,
+        "E": 9,
+        "F": 11,
+        "G": 9,
+        "H": 11,
+        "I": 14,
+        "J": 11,
+        "K": 14,
+        "L": 10,
+    }
+    for col, width in widths.items():
+        ws_jobs.column_dimensions[col].width = width
+
+    _apply_11x17_portrait_layout(ws_jobs)
+
+
+def _write_overall_job_status_sheet(ws_job_status, job_shipping_rows, bold, thin, fill_green, fill_orange, fill_red, fill_gray):
+    """Write the Overall Job Status worksheet."""
+    job_status_headers = [
+        "Job Number",
+        "Customer Name",
+        "Expected Ship Date",
+        "Due Date",
+        "Ship Buffer Days",
+        "On-Time",
+        "Schedule Status",
+    ]
+
+    for col_num, header in enumerate(job_status_headers, start=1):
+        cell = ws_job_status.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    row_num = 2
+    for row in job_shipping_rows:
+        values = [
+            row.get("Job Number", ""),
+            row.get("Customer Name", ""),
+            row.get("Expected Ship Date", ""),
+            row.get("Due Date", ""),
+            row.get("Ship Buffer Days", ""),
+            row.get("On-Time", ""),
+            row.get("Schedule Status", ""),
+        ]
+
+        for col_num, value in enumerate(values, start=1):
+            cell = ws_job_status.cell(row_num, col_num, value)
+            cell.border = thin
+            if col_num in {3, 4} and value != "":
+                cell.number_format = "m/d/yyyy"
+
+        on_time = str(row.get("On-Time", "") or "").strip().upper()
+        if on_time == "YES":
+            ws_job_status.cell(row_num, 6).fill = fill_green
+        elif on_time == "NO":
+            ws_job_status.cell(row_num, 6).fill = fill_red
+        elif on_time == "NOT SCHEDULED":
+            ws_job_status.cell(row_num, 6).fill = fill_orange
+        else:
+            ws_job_status.cell(row_num, 6).fill = fill_gray
+
+        row_num += 1
+
+    status_widths = {
+        "A": 12,
+        "B": 24,
+        "C": 14,
+        "D": 11,
+        "E": 14,
+        "F": 10,
+        "G": 18,
+    }
+    for col, width in status_widths.items():
+        ws_job_status.column_dimensions[col].width = width
+
+    _apply_letter_portrait_layout(ws_job_status)
+
+
+def export_mold_schedule(export_blocks, output_file="Mold Schedule.xlsx", job_shipping_rows=None, melt_schedule=None, day_dates=None):
     """
     Write the mold schedule to an Excel workbook.
 
@@ -993,7 +1211,7 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
     rows.  Column widths, bold headers, and thin borders are applied.
 
     Args:
-        Export_Blocks: Output of Build_Daily_Export_Blocks.
+        export_blocks: Output of build_daily_export_blocks.
         output_file:   Destination path for the workbook.
         melt_schedule: Optional melt schedule used to add a simplified Melt Schedule sheet.
         day_dates:     Optional day-date mapping for melt schedule rows.
@@ -1004,275 +1222,45 @@ def export_mold_schedule(Export_Blocks, output_file="Mold Schedule.xlsx", job_sh
         ws = wb.active
         ws.title = "Mold Schedule"
         created_on = datetime.now()
-        total_molds = sum(float(block.get("mold_total", 0) or 0) for block in Export_Blocks.values())
-        avg_molds_per_day = total_molds / max(len(Export_Blocks), 1)
-
-        _write_schedule_banner(
-            ws,
-            "Mold Schedule",
-            created_on,
-            "Average Molds / Day",
-            f"{avg_molds_per_day:,.1f}",
-            10,
-        )
-
-        current_row = 5
-
         thin = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
         bold = Font(bold=True)
-        day_title_fill = REPORT_HEADER_FILL
-
-        for day in sorted(Export_Blocks.keys()):
-            block = Export_Blocks[day]
-
-            ws.cell(current_row, 1, "Mold Schedule")
-            ws.cell(current_row, 2, block["date"].strftime("%m/%d/%Y"))
-            ws.cell(current_row, 4, block["weekday"])
-
-            for col in range(1, 11):
-                ws.cell(current_row, col).font = bold
-                ws.cell(current_row, col).fill = day_title_fill
-
-            ws.row_dimensions[current_row].height = 20
-
-            current_row += 2
-
-            headers = [
-                "Customer Name",
-                "Part Number",
-                "Job Number",
-                "EXT",
-                "Alloy",
-                "Mold Type",
-                "Quantity of Molds",
-                "Quantity of Cores",
-                "Total Weight",
-                "Number of Molds Today",
-            ]
-
-            for col_num, header in enumerate(headers, start=1):
-                cell = ws.cell(current_row, col_num, header)
-                cell.border = thin
-                cell.font = bold
-
-            _apply_schedule_day_header(ws, current_row, len(headers))
-
-            current_row += 1
-
-            for _, row in block["rows"].iterrows():
-                values = [
-                    row.get("Customer Name", ""),
-                    row.get("Part Number", ""),
-                    row.get(Columns.COL_JOB_NUMBER, ""),
-                    row.get("EXT", ""),
-                    row.get(Columns.COL_ALLOY, ""),
-                    row.get(Columns.COL_CAST_TYPE, ""),
-                    row.get("Quantity of Molds", ""),
-                    row.get("Quantity of Cores", ""),
-                    _resolve_column_value(row, "Total Weight", "Total Weight per EXT"),
-                    _resolve_column_value(row, "Number of Molds Today", "# of Molds Today", "Molds for EXT"),
-                ]
-
-                for col_num, value in enumerate(values, start=1):
-                    cell = ws.cell(current_row, col_num, value)
-                    cell.border = thin
-                    cell.fill = REPORT_SEPARATOR_FILL
-
-                current_row += 1
-
-            ws.cell(current_row, 1, "TOTALS")
-            ws.cell(current_row, 9, block["weight_total"])
-            ws.cell(current_row, 10, block["mold_total"])
-            _apply_schedule_total_row(ws, current_row, [1, 9, 10])
-            current_row += 4
-
-        widths = {
-            "A": 20,
-            "B": 13,
-            "C": 11,
-            "D": 11,
-            "E": 10,
-            "F": 5,
-            "G": 10,
-            "H": 10,
-            "I": 13,
-            "J": 11,
-        }
-
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
-
-        _apply_11x17_portrait_layout(ws)
+        _write_mold_schedule_sheet(ws, export_blocks, created_on, bold, thin)
 
         if melt_schedule and day_dates:
             ws_melt = wb.create_sheet("Melt Schedule")
             _write_day_blocked_melt_sheet(ws_melt, melt_schedule, day_dates, "Melt Schedule", created_on)
 
         if job_shipping_rows:
-            ws_jobs = wb.create_sheet("Job Shipping Outlook")
             fill_green = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
             fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
             fill_orange = PatternFill(fill_type="solid", start_color="FCE4D6", end_color="FCE4D6")
             fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
             fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
 
-            headers = [
-                "Job Number",
-                "Schedule Status",
-                "Planned Molds",
-                "Scheduled Molds",
-                "Mold Day",
-                "Mold Date",
-                "Pour Day",
-                "Pour Date",
-                "Expected Ship Date",
-                "Due Date",
-                "Ship Buffer Days",
-                "On-Time",
-            ]
-
-            for col_num, header in enumerate(headers, start=1):
-                cell = ws_jobs.cell(1, col_num, header)
-                cell.font = bold
-                cell.border = thin
-
-            row_num = 2
-            for row in job_shipping_rows:
-                values = [
-                    row.get("Job Number", ""),
-                    row.get("Schedule Status", ""),
-                    row.get("Planned Molds", ""),
-                    row.get("Scheduled Molds", ""),
-                    row.get("Mold Day", ""),
-                    row.get("Mold Date", ""),
-                    row.get("Pour Day", ""),
-                    row.get("Pour Date", ""),
-                    row.get("Expected Ship Date", ""),
-                    row.get("Due Date", ""),
-                    row.get("Ship Buffer Days", ""),
-                    row.get("On-Time", ""),
-                ]
-
-                for col_num, value in enumerate(values, start=1):
-                    cell = ws_jobs.cell(row_num, col_num, value)
-                    cell.border = thin
-                    if col_num in {6, 8, 9, 10} and value != "":
-                        cell.number_format = "m/d/yyyy"
-
-                schedule_status = str(row.get("Schedule Status", "")).strip().upper()
-                on_time = str(row.get("On-Time", "")).strip().upper()
-                buffer_value = row.get("Ship Buffer Days", None)
-
-                if schedule_status == "SCHEDULED":
-                    ws_jobs.cell(row_num, 2).fill = fill_green
-                elif schedule_status == "PARTIALLY SCHEDULED":
-                    ws_jobs.cell(row_num, 2).fill = fill_yellow
-                elif schedule_status == "NOT YET SCHEDULED":
-                    ws_jobs.cell(row_num, 2).fill = fill_orange
-
-                if on_time == "YES":
-                    ws_jobs.cell(row_num, 12).fill = fill_green
-                elif on_time == "NO":
-                    ws_jobs.cell(row_num, 12).fill = fill_red
-                elif on_time == "NOT SCHEDULED":
-                    ws_jobs.cell(row_num, 12).fill = fill_orange
-                else:
-                    ws_jobs.cell(row_num, 12).fill = fill_gray
-
-                try:
-                    if buffer_value is None or pd.isna(buffer_value):
-                        ws_jobs.cell(row_num, 11).fill = fill_gray
-                    else:
-                        buffer_days = int(buffer_value)
-                        if buffer_days < 0:
-                            ws_jobs.cell(row_num, 11).fill = fill_red
-                        elif buffer_days < 4:
-                            ws_jobs.cell(row_num, 11).fill = fill_yellow
-                        else:
-                            ws_jobs.cell(row_num, 11).fill = fill_green
-                except (TypeError, ValueError):
-                    ws_jobs.cell(row_num, 11).fill = fill_gray
-
-                row_num += 1
-
-            widths = {
-                "A": 12,
-                "B": 18,
-                "C": 12,
-                "D": 13,
-                "E": 9,
-                "F": 11,
-                "G": 9,
-                "H": 11,
-                "I": 14,
-                "J": 11,
-                "K": 14,
-                "L": 10,
-            }
-            for col, width in widths.items():
-                ws_jobs.column_dimensions[col].width = width
-
-            _apply_11x17_portrait_layout(ws_jobs)
+            ws_jobs = wb.create_sheet("Job Shipping Outlook")
+            _write_job_shipping_outlook_sheet(
+                ws_jobs,
+                job_shipping_rows,
+                bold,
+                thin,
+                fill_green,
+                fill_yellow,
+                fill_orange,
+                fill_red,
+                fill_gray,
+            )
 
             ws_job_status = wb.create_sheet("Overall Job Status")
-            job_status_headers = [
-                "Job Number",
-                "Customer Name",
-                "Expected Ship Date",
-                "Due Date",
-                "Ship Buffer Days",
-                "On-Time",
-                "Schedule Status",
-            ]
-
-            for col_num, header in enumerate(job_status_headers, start=1):
-                cell = ws_job_status.cell(1, col_num, header)
-                cell.font = bold
-                cell.border = thin
-
-            row_num = 2
-            for row in job_shipping_rows:
-                values = [
-                    row.get("Job Number", ""),
-                    row.get("Customer Name", ""),
-                    row.get("Expected Ship Date", ""),
-                    row.get("Due Date", ""),
-                    row.get("Ship Buffer Days", ""),
-                    row.get("On-Time", ""),
-                    row.get("Schedule Status", ""),
-                ]
-
-                for col_num, value in enumerate(values, start=1):
-                    cell = ws_job_status.cell(row_num, col_num, value)
-                    cell.border = thin
-                    if col_num in {3, 4} and value != "":
-                        cell.number_format = "m/d/yyyy"
-
-                on_time = str(row.get("On-Time", "") or "").strip().upper()
-                if on_time == "YES":
-                    ws_job_status.cell(row_num, 6).fill = fill_green
-                elif on_time == "NO":
-                    ws_job_status.cell(row_num, 6).fill = fill_red
-                elif on_time == "NOT SCHEDULED":
-                    ws_job_status.cell(row_num, 6).fill = fill_orange
-                else:
-                    ws_job_status.cell(row_num, 6).fill = fill_gray
-
-                row_num += 1
-
-            status_widths = {
-                "A": 12,
-                "B": 24,
-                "C": 14,
-                "D": 11,
-                "E": 14,
-                "F": 10,
-                "G": 18,
-            }
-            for col, width in status_widths.items():
-                ws_job_status.column_dimensions[col].width = width
-
-            _apply_letter_portrait_layout(ws_job_status)
+            _write_overall_job_status_sheet(
+                ws_job_status,
+                job_shipping_rows,
+                bold,
+                thin,
+                fill_green,
+                fill_orange,
+                fill_red,
+                fill_gray,
+            )
 
         wb.save(output_file)
         print(f"Saved: {output_file}")
@@ -1583,6 +1571,383 @@ def _format_date_range(values):
     return f"{first_date:%m/%d/%Y} - {last_date:%m/%d/%Y}"
 
 
+def _status_fill_for_two_week(status, fill_green, fill_yellow, fill_red, fill_gray):
+    """Return status fill color for two-week rule status text."""
+    status_text = str(status or "").strip().upper()
+    if status_text == "PASS":
+        return fill_green
+    if status_text == "EXCEPTION - NO TIME":
+        return fill_yellow
+    if status_text == "VIOLATION":
+        return fill_red
+    return fill_gray
+
+
+def _status_fill_for_due_buffer(status, fill_green, fill_yellow, fill_red, fill_gray):
+    """Return status fill color for due-buffer risk text."""
+    text = str(status or "").strip().upper()
+    if text == "ON TRACK":
+        return fill_green
+    if text == "WATCH":
+        return fill_yellow
+    if text == "AT RISK":
+        return fill_red
+    return fill_gray
+
+
+def _write_heat_planner_sheet(ws_planner, summary_rows, bold, thin, fill_green, fill_yellow, fill_red, fill_gray):
+    """Write the Heat Planner worksheet."""
+    planner_headers = [
+        "Schedule Date",
+        "Weekday",
+        "Heat Slot",
+        "Heat Status",
+        "Heat #",
+        "Planning Priority",
+        "Review Window",
+        "Anchor Alloy",
+        "Compatibility Group",
+        "Earliest Due Date",
+        "Latest Due Date",
+        "Target Pour Date",
+        "Pour Buffer Days",
+        "Due Buffer Status",
+        "Total Weight (lbs)",
+        "Total Molds",
+        "Jobs",
+        "Extensions",
+        "Max Mold Lead Days",
+        "Avg Mold Lead Days",
+        "Two Week Rule Status",
+        "Two Week Rule Note",
+        "Planner Diagnostic",
+        "Manual Alloy",
+        "Manual Weight (lbs)",
+        "Manual Molds",
+        "Planner Notes",
+    ]
+
+    for col_num, header in enumerate(planner_headers, start=1):
+        cell = ws_planner.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    planner_rows = build_heat_planner_rows(summary_rows)
+    current_row = 2
+
+    for row in planner_rows:
+        values = [
+            row["Schedule Date"],
+            row["Weekday"],
+            row["Heat Slot"],
+            row["Heat Status"],
+            row["Heat #"],
+            row["Planning Priority"],
+            row["Review Window"],
+            row["Anchor Alloy"],
+            row["Compatibility Group"],
+            row["Earliest Due Date"],
+            row["Latest Due Date"],
+            row["Target Pour Date"],
+            row["Pour Buffer Days"],
+            row["Due Buffer Status"],
+            row["Total Weight (lbs)"],
+            row["Total Molds"],
+            row["Jobs"],
+            row["Extensions"],
+            row.get("Max Mold Lead Days", ""),
+            row.get("Avg Mold Lead Days", ""),
+            row.get("Two Week Rule Status", ""),
+            row.get("Two Week Rule Note", ""),
+            row["Planner Diagnostic"],
+            row["Manual Alloy"],
+            row["Manual Weight (lbs)"],
+            row["Manual Molds"],
+            row["Planner Notes"],
+        ]
+
+        for col_num, value in enumerate(values, start=1):
+            cell = ws_planner.cell(current_row, col_num, value)
+            cell.border = thin
+            if col_num in {1, 10, 11, 12} and value != "":
+                cell.number_format = "m/d/yyyy"
+            if col_num in {15, 25} and value != "":
+                cell.number_format = "#,##0.00"
+            if col_num in {16, 26} and value != "":
+                cell.number_format = "#,##0"
+            if col_num in {22, 23, 27}:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        ws_planner.cell(current_row, 21).fill = _status_fill_for_two_week(
+            row.get("Two Week Rule Status", ""),
+            fill_green,
+            fill_yellow,
+            fill_red,
+            fill_gray,
+        )
+
+        current_row += 1
+
+    planner_widths = {
+        "A": 14,
+        "B": 12,
+        "C": 10,
+        "D": 12,
+        "E": 8,
+        "F": 18,
+        "G": 15,
+        "H": 15,
+        "I": 18,
+        "J": 14,
+        "K": 14,
+        "L": 14,
+        "M": 12,
+        "N": 14,
+        "O": 18,
+        "P": 12,
+        "Q": 24,
+        "R": 28,
+        "S": 14,
+        "T": 14,
+        "U": 18,
+        "V": 36,
+        "W": 30,
+        "X": 15,
+        "Y": 18,
+        "Z": 14,
+        "AA": 28,
+    }
+
+    for col, width in planner_widths.items():
+        ws_planner.column_dimensions[col].width = width
+
+    _apply_11x17_portrait_layout(ws_planner)
+
+
+def _write_melt_management_sheet(ws_melt_mgmt, summary_rows, melt_schedule, day_dates, mold_schedule_frame, mold_day_dates, bold, thin, fill_green, fill_yellow, fill_red, fill_gray):
+    """Write the Melt Mgmt Summary worksheet."""
+    melt_mgmt_headers = [
+        "Pour Date",
+        "Heat #",
+        "Customer(s)",
+        "Poured Job IDs",
+        "Due Date(s)",
+        "Mold Date(s)",
+        "Pour Date(s)",
+        "Expected Ship Date",
+        "Pour Buffer Days",
+        "Due Buffer Status",
+        "Two Week Rule Status",
+        "Planner Diagnostic",
+    ]
+    for col_num, header in enumerate(melt_mgmt_headers, start=1):
+        cell = ws_melt_mgmt.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    customer_map = {}
+    poured_jobs_map = {}
+    for day in sorted(melt_schedule.keys()):
+        day_rows = melt_schedule[day].get("rows", pd.DataFrame()).copy()
+        if day_rows.empty:
+            continue
+        for heat_number, heat_df in day_rows.groupby("Heat #", sort=True):
+            if pd.isna(heat_number) or heat_number == "":
+                continue
+            names = [
+                str(value).strip()
+                for value in heat_df.get("Customer Name", pd.Series(dtype="object"))
+                if str(value).strip()
+            ]
+            unique_names = []
+            for name in names:
+                if name not in unique_names:
+                    unique_names.append(name)
+            customer_map[(int(day), heat_number)] = ", ".join(unique_names)
+
+            jobs = [
+                str(value).strip()
+                for value in heat_df.get(Columns.COL_JOB_NUMBER, pd.Series(dtype="object"))
+                if str(value).strip()
+            ]
+            unique_jobs = []
+            for job in jobs:
+                if job not in unique_jobs:
+                    unique_jobs.append(job)
+            poured_jobs_map[(int(day), heat_number)] = ", ".join(unique_jobs)
+
+    mold_date_map = {}
+    if mold_schedule_frame is not None and not mold_schedule_frame.empty:
+        mold_frame = mold_schedule_frame.copy()
+        for (pour_day, heat_number), mold_df in mold_frame.groupby(["Pour Schedule Day", "Heat #"], sort=True):
+            day_values = pd.to_numeric(mold_df.get("Schedule Day", pd.Series(dtype="float64")), errors="coerce").dropna()
+            mold_dates = []
+            for day_value in day_values:
+                day_int = int(day_value)
+                if mold_day_dates and day_int in mold_day_dates:
+                    mold_dates.append(mold_day_dates[day_int].get("date", pd.NaT))
+            if mold_dates:
+                mold_date_map[(int(pour_day), heat_number)] = _format_date_range(mold_dates)
+
+    mgmt_row = 2
+    for row in summary_rows:
+        if str(row.get("Heat Status", "")) == "Reserved":
+            continue
+
+        pour_date = _normalize_due_date(row.get("Schedule Date", ""))
+        due_dates = _format_date_range([
+            row.get("Earliest Due Date", ""),
+            row.get("Latest Due Date", ""),
+        ])
+        pour_dates = _format_date_range([row.get("Schedule Date", "")])
+        expected_ship = ""
+        schedule_ts = _normalize_date_value(row.get("Schedule Date", ""))
+        if not pd.isna(schedule_ts):
+            expected_ship = (schedule_ts + pd.Timedelta(days=14)).date()
+
+        by_day_key = None
+        for day in sorted(melt_schedule.keys()):
+            day_date = day_dates.get(day, {}).get("date", pd.NaT)
+            day_date_norm = _normalize_date_value(day_date)
+            row_date_norm = _normalize_date_value(row.get("Schedule Date", pd.NaT))
+            if not pd.isna(day_date_norm) and not pd.isna(row_date_norm) and day_date_norm == row_date_norm:
+                by_day_key = (int(day), row.get("Heat #", ""))
+                break
+
+        values = [
+            pour_date,
+            row.get("Heat #", ""),
+            customer_map.get(by_day_key, ""),
+            poured_jobs_map.get(by_day_key, ""),
+            due_dates,
+            mold_date_map.get(by_day_key, ""),
+            pour_dates,
+            _normalize_due_date(expected_ship),
+            row.get("Pour Buffer Days", ""),
+            row.get("Due Buffer Status", ""),
+            row.get("Two Week Rule Status", ""),
+            row.get("Planner Diagnostic", ""),
+        ]
+
+        for col_num, value in enumerate(values, start=1):
+            cell = ws_melt_mgmt.cell(mgmt_row, col_num, value)
+            cell.border = thin
+            if col_num in {1, 8} and value != "":
+                cell.number_format = "m/d/yyyy"
+            if col_num == 12:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        ws_melt_mgmt.cell(mgmt_row, 10).fill = _status_fill_for_due_buffer(
+            row.get("Due Buffer Status", ""),
+            fill_green,
+            fill_yellow,
+            fill_red,
+            fill_gray,
+        )
+        ws_melt_mgmt.cell(mgmt_row, 11).fill = _status_fill_for_two_week(
+            row.get("Two Week Rule Status", ""),
+            fill_green,
+            fill_yellow,
+            fill_red,
+            fill_gray,
+        )
+        mgmt_row += 1
+
+    melt_mgmt_widths = {
+        "A": 11,
+        "B": 8,
+        "C": 26,
+        "D": 18,
+        "E": 23,
+        "F": 20,
+        "G": 13,
+        "H": 13,
+        "I": 12,
+        "J": 13,
+        "K": 18,
+        "L": 36,
+    }
+    for col, width in melt_mgmt_widths.items():
+        ws_melt_mgmt.column_dimensions[col].width = width
+
+    melt_capacity_rows = _build_melt_capacity_rows(melt_schedule)
+    _write_capacity_block(
+        ws_melt_mgmt,
+        max(4, mgmt_row + 2),
+        "Daily Melt Capacity",
+        ["Day", "Heat Capacity", "Weight Capacity"],
+        melt_capacity_rows,
+        bold,
+        thin,
+    )
+    _apply_letter_portrait_layout(ws_melt_mgmt)
+
+
+def _write_melt_diagnostics_sheet(ws_melt_diag, melt_schedule, day_dates, mold_schedule_frame, bold, thin):
+    """Write the Melt Diagnostics worksheet."""
+    melt_diag_headers = [
+        "Skipped Pour Day",
+        "Skipped Pour Date",
+        "Weekday",
+        "Original Heats On Day",
+        "Heats Pushed Later",
+        "Pushed To Pour Days",
+        "Mold Window Days",
+        "Window Line Usage",
+        "Window Floor Usage",
+        "Likely Cause",
+    ]
+    for col_num, header in enumerate(melt_diag_headers, start=1):
+        cell = ws_melt_diag.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    melt_diag_rows = _build_melt_gap_diagnostics(melt_schedule, day_dates, mold_schedule_frame)
+    diag_row = 2
+    if melt_diag_rows:
+        for row in melt_diag_rows:
+            values = [
+                row.get("Skipped Pour Day", ""),
+                row.get("Skipped Pour Date", ""),
+                row.get("Weekday", ""),
+                row.get("Original Heats On Day", ""),
+                row.get("Heats Pushed Later", ""),
+                row.get("Pushed To Pour Days", ""),
+                row.get("Mold Window Days", ""),
+                row.get("Window Line Usage", ""),
+                row.get("Window Floor Usage", ""),
+                row.get("Likely Cause", ""),
+            ]
+            for col_num, value in enumerate(values, start=1):
+                cell = ws_melt_diag.cell(diag_row, col_num, value)
+                cell.border = thin
+                if col_num == 2 and value != "":
+                    cell.number_format = "m/d/yyyy"
+                if col_num == 10:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+            diag_row += 1
+    else:
+        ws_melt_diag.cell(2, 1, "No skipped pour days detected in the current melt schedule range.")
+        ws_melt_diag.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(melt_diag_headers))
+        ws_melt_diag.cell(2, 1).alignment = Alignment(horizontal="left", vertical="center")
+
+    melt_diag_widths = {
+        "A": 15,
+        "B": 15,
+        "C": 11,
+        "D": 20,
+        "E": 18,
+        "F": 20,
+        "G": 15,
+        "H": 18,
+        "I": 18,
+        "J": 70,
+    }
+    for col, width in melt_diag_widths.items():
+        ws_melt_diag.column_dimensions[col].width = width
+    _apply_letter_portrait_layout(ws_melt_diag)
+
+
 def export_heat_summary(
     melt_schedule,
     day_dates,
@@ -1651,16 +2016,6 @@ def export_heat_summary(
         fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
         fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
         fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
-
-        def _two_week_status_fill(status):
-            status_text = str(status or "").strip().upper()
-            if status_text == "PASS":
-                return fill_green
-            if status_text == "EXCEPTION - NO TIME":
-                return fill_yellow
-            if status_text == "VIOLATION":
-                return fill_red
-            return fill_gray
 
         summary_rows = build_heat_summary_rows((melt_schedule, day_dates), mold_schedule_frame=mold_schedule_frame)
         total_poured_lbs = 0.0
@@ -1748,7 +2103,13 @@ def export_heat_summary(
                         if col_num in {23, 24, 25}:
                             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-                    ws.cell(current_row, 22).fill = _two_week_status_fill(row.get("Two Week Rule Status", ""))
+                    ws.cell(current_row, 22).fill = _status_fill_for_two_week(
+                        row.get("Two Week Rule Status", ""),
+                        fill_green,
+                        fill_yellow,
+                        fill_red,
+                        fill_gray,
+                    )
 
                     current_row += 1
 
@@ -1792,296 +2153,32 @@ def export_heat_summary(
         _apply_11x17_portrait_layout(ws)
 
         ws_planner = wb.create_sheet("Heat Planner")
-        planner_headers = [
-            "Schedule Date",
-            "Weekday",
-            "Heat Slot",
-            "Heat Status",
-            "Heat #",
-            "Planning Priority",
-            "Review Window",
-            "Anchor Alloy",
-            "Compatibility Group",
-            "Earliest Due Date",
-            "Latest Due Date",
-            "Target Pour Date",
-            "Pour Buffer Days",
-            "Due Buffer Status",
-            "Total Weight (lbs)",
-            "Total Molds",
-            "Jobs",
-            "Extensions",
-            "Max Mold Lead Days",
-            "Avg Mold Lead Days",
-            "Two Week Rule Status",
-            "Two Week Rule Note",
-            "Planner Diagnostic",
-            "Manual Alloy",
-            "Manual Weight (lbs)",
-            "Manual Molds",
-            "Planner Notes",
-        ]
-
-        for col_num, header in enumerate(planner_headers, start=1):
-            cell = ws_planner.cell(1, col_num, header)
-            cell.font = bold
-            cell.border = thin
-
-        planner_rows = build_heat_planner_rows(summary_rows)
-        current_row = 2
-
-        for row in planner_rows:
-            values = [
-                row["Schedule Date"],
-                row["Weekday"],
-                row["Heat Slot"],
-                row["Heat Status"],
-                row["Heat #"],
-                row["Planning Priority"],
-                row["Review Window"],
-                row["Anchor Alloy"],
-                row["Compatibility Group"],
-                row["Earliest Due Date"],
-                row["Latest Due Date"],
-                row["Target Pour Date"],
-                row["Pour Buffer Days"],
-                row["Due Buffer Status"],
-                row["Total Weight (lbs)"],
-                row["Total Molds"],
-                row["Jobs"],
-                row["Extensions"],
-                row.get("Max Mold Lead Days", ""),
-                row.get("Avg Mold Lead Days", ""),
-                row.get("Two Week Rule Status", ""),
-                row.get("Two Week Rule Note", ""),
-                row["Planner Diagnostic"],
-                row["Manual Alloy"],
-                row["Manual Weight (lbs)"],
-                row["Manual Molds"],
-                row["Planner Notes"],
-            ]
-
-            for col_num, value in enumerate(values, start=1):
-                cell = ws_planner.cell(current_row, col_num, value)
-                cell.border = thin
-                if col_num in {1, 10, 11, 12} and value != "":
-                    cell.number_format = "m/d/yyyy"
-                if col_num in {15, 25} and value != "":
-                    cell.number_format = "#,##0.00"
-                if col_num in {16, 26} and value != "":
-                    cell.number_format = "#,##0"
-                if col_num in {22, 23, 27}:
-                    cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-            ws_planner.cell(current_row, 21).fill = _two_week_status_fill(row.get("Two Week Rule Status", ""))
-
-            current_row += 1
-
-        planner_widths = {
-            "A": 14,
-            "B": 12,
-            "C": 10,
-            "D": 12,
-            "E": 8,
-            "F": 18,
-            "G": 15,
-            "H": 15,
-            "I": 18,
-            "J": 14,
-            "K": 14,
-            "L": 14,
-            "M": 12,
-            "N": 14,
-            "O": 18,
-            "P": 12,
-            "Q": 24,
-            "R": 28,
-            "S": 14,
-            "T": 14,
-            "U": 18,
-            "V": 36,
-            "W": 30,
-            "X": 15,
-            "Y": 18,
-            "Z": 14,
-            "AA": 28,
-        }
-
-        for col, width in planner_widths.items():
-            ws_planner.column_dimensions[col].width = width
-
-        _apply_11x17_portrait_layout(ws_planner)
-
-        ws_melt_mgmt = wb.create_sheet("Melt Mgmt Summary")
-        melt_mgmt_headers = [
-            "Pour Date",
-            "Heat #",
-            "Customer(s)",
-            "Poured Job IDs",
-            "Due Date(s)",
-            "Mold Date(s)",
-            "Pour Date(s)",
-            "Expected Ship Date",
-            "Pour Buffer Days",
-            "Due Buffer Status",
-            "Two Week Rule Status",
-            "Planner Diagnostic",
-        ]
-        for col_num, header in enumerate(melt_mgmt_headers, start=1):
-            cell = ws_melt_mgmt.cell(1, col_num, header)
-            cell.font = bold
-            cell.border = thin
-
-        customer_map = {}
-        poured_jobs_map = {}
-        for day in sorted(melt_schedule.keys()):
-            day_rows = melt_schedule[day].get("rows", pd.DataFrame()).copy()
-            if day_rows.empty:
-                continue
-            for heat_number, heat_df in day_rows.groupby("Heat #", sort=True):
-                if pd.isna(heat_number) or heat_number == "":
-                    continue
-                names = [
-                    str(value).strip()
-                    for value in heat_df.get("Customer Name", pd.Series(dtype="object"))
-                    if str(value).strip()
-                ]
-                unique_names = []
-                for name in names:
-                    if name not in unique_names:
-                        unique_names.append(name)
-                customer_map[(int(day), heat_number)] = ", ".join(unique_names)
-
-                jobs = [
-                    str(value).strip()
-                    for value in heat_df.get(Columns.COL_JOB_NUMBER, pd.Series(dtype="object"))
-                    if str(value).strip()
-                ]
-                unique_jobs = []
-                for job in jobs:
-                    if job not in unique_jobs:
-                        unique_jobs.append(job)
-                poured_jobs_map[(int(day), heat_number)] = ", ".join(unique_jobs)
-
-        mold_date_map = {}
-        if mold_schedule_frame is not None and not mold_schedule_frame.empty:
-            mold_frame = mold_schedule_frame.copy()
-            for (pour_day, heat_number), mold_df in mold_frame.groupby(["Pour Schedule Day", "Heat #"], sort=True):
-                day_values = pd.to_numeric(mold_df.get("Schedule Day", pd.Series(dtype="float64")), errors="coerce").dropna()
-                mold_dates = []
-                for day_value in day_values:
-                    day_int = int(day_value)
-                    if mold_day_dates and day_int in mold_day_dates:
-                        mold_dates.append(mold_day_dates[day_int].get("date", pd.NaT))
-                if mold_dates:
-                    mold_date_map[(int(pour_day), heat_number)] = _format_date_range(mold_dates)
-
-        fill_green = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
-        fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
-        fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
-        fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
-
-        def _status_fill_for_due_buffer(status):
-            text = str(status or "").strip().upper()
-            if text == "ON TRACK":
-                return fill_green
-            if text == "WATCH":
-                return fill_yellow
-            if text == "AT RISK":
-                return fill_red
-            return fill_gray
-
-        def _status_fill_for_two_week(status):
-            text = str(status or "").strip().upper()
-            if text == "PASS":
-                return fill_green
-            if text == "EXCEPTION - NO TIME":
-                return fill_yellow
-            if text == "VIOLATION":
-                return fill_red
-            return fill_gray
-
-        mgmt_row = 2
-        for row in summary_rows:
-            if str(row.get("Heat Status", "")) == "Reserved":
-                continue
-
-            pour_date = _normalize_due_date(row.get("Schedule Date", ""))
-            due_dates = _format_date_range([
-                row.get("Earliest Due Date", ""),
-                row.get("Latest Due Date", ""),
-            ])
-            pour_dates = _format_date_range([row.get("Schedule Date", "")])
-            expected_ship = ""
-            schedule_ts = _normalize_date_value(row.get("Schedule Date", ""))
-            if not pd.isna(schedule_ts):
-                expected_ship = (schedule_ts + pd.Timedelta(days=14)).date()
-
-            # Resolve by schedule day and heat number, matching build_heat_summary_rows keying.
-            by_day_key = None
-            for day in sorted(melt_schedule.keys()):
-                day_date = day_dates.get(day, {}).get("date", pd.NaT)
-                day_date_norm = _normalize_date_value(day_date)
-                row_date_norm = _normalize_date_value(row.get("Schedule Date", pd.NaT))
-                if not pd.isna(day_date_norm) and not pd.isna(row_date_norm) and day_date_norm == row_date_norm:
-                    by_day_key = (int(day), row.get("Heat #", ""))
-                    break
-
-            values = [
-                pour_date,
-                row.get("Heat #", ""),
-                customer_map.get(by_day_key, ""),
-                poured_jobs_map.get(by_day_key, ""),
-                due_dates,
-                mold_date_map.get(by_day_key, ""),
-                pour_dates,
-                _normalize_due_date(expected_ship),
-                row.get("Pour Buffer Days", ""),
-                row.get("Due Buffer Status", ""),
-                row.get("Two Week Rule Status", ""),
-                row.get("Planner Diagnostic", ""),
-            ]
-
-            for col_num, value in enumerate(values, start=1):
-                cell = ws_melt_mgmt.cell(mgmt_row, col_num, value)
-                cell.border = thin
-                if col_num in {1, 8} and value != "":
-                    cell.number_format = "m/d/yyyy"
-                if col_num == 12:
-                    cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-            ws_melt_mgmt.cell(mgmt_row, 10).fill = _status_fill_for_due_buffer(row.get("Due Buffer Status", ""))
-            ws_melt_mgmt.cell(mgmt_row, 11).fill = _status_fill_for_two_week(row.get("Two Week Rule Status", ""))
-            mgmt_row += 1
-
-        melt_mgmt_widths = {
-            "A": 11,
-            "B": 8,
-            "C": 26,
-            "D": 18,
-            "E": 23,
-            "F": 20,
-            "G": 13,
-            "H": 13,
-            "I": 12,
-            "J": 13,
-            "K": 18,
-            "L": 36,
-        }
-        for col, width in melt_mgmt_widths.items():
-            ws_melt_mgmt.column_dimensions[col].width = width
-
-        melt_capacity_rows = _build_melt_capacity_rows(melt_schedule)
-        _write_capacity_block(
-            ws_melt_mgmt,
-            max(4, mgmt_row + 2),
-            "Daily Melt Capacity",
-            ["Day", "Heat Capacity", "Weight Capacity"],
-            melt_capacity_rows,
+        _write_heat_planner_sheet(
+            ws_planner,
+            summary_rows,
             bold,
             thin,
+            fill_green,
+            fill_yellow,
+            fill_red,
+            fill_gray,
         )
-        _apply_letter_portrait_layout(ws_melt_mgmt)
+
+        ws_melt_mgmt = wb.create_sheet("Melt Mgmt Summary")
+        _write_melt_management_sheet(
+            ws_melt_mgmt,
+            summary_rows,
+            melt_schedule,
+            day_dates,
+            mold_schedule_frame,
+            mold_day_dates,
+            bold,
+            thin,
+            fill_green,
+            fill_yellow,
+            fill_red,
+            fill_gray,
+        )
 
         ws_melt_dept = wb.create_sheet("Melt Dept Schedule")
         _write_day_blocked_melt_sheet(
@@ -2093,67 +2190,14 @@ def export_heat_summary(
         )
 
         ws_melt_diag = wb.create_sheet("Melt Diagnostics")
-        melt_diag_headers = [
-            "Skipped Pour Day",
-            "Skipped Pour Date",
-            "Weekday",
-            "Original Heats On Day",
-            "Heats Pushed Later",
-            "Pushed To Pour Days",
-            "Mold Window Days",
-            "Window Line Usage",
-            "Window Floor Usage",
-            "Likely Cause",
-        ]
-        for col_num, header in enumerate(melt_diag_headers, start=1):
-            cell = ws_melt_diag.cell(1, col_num, header)
-            cell.font = bold
-            cell.border = thin
-
-        melt_diag_rows = _build_melt_gap_diagnostics(melt_schedule, day_dates, mold_schedule_frame)
-        diag_row = 2
-        if melt_diag_rows:
-            for row in melt_diag_rows:
-                values = [
-                    row.get("Skipped Pour Day", ""),
-                    row.get("Skipped Pour Date", ""),
-                    row.get("Weekday", ""),
-                    row.get("Original Heats On Day", ""),
-                    row.get("Heats Pushed Later", ""),
-                    row.get("Pushed To Pour Days", ""),
-                    row.get("Mold Window Days", ""),
-                    row.get("Window Line Usage", ""),
-                    row.get("Window Floor Usage", ""),
-                    row.get("Likely Cause", ""),
-                ]
-                for col_num, value in enumerate(values, start=1):
-                    cell = ws_melt_diag.cell(diag_row, col_num, value)
-                    cell.border = thin
-                    if col_num == 2 and value != "":
-                        cell.number_format = "m/d/yyyy"
-                    if col_num == 10:
-                        cell.alignment = Alignment(wrap_text=True, vertical="top")
-                diag_row += 1
-        else:
-            ws_melt_diag.cell(2, 1, "No skipped pour days detected in the current melt schedule range.")
-            ws_melt_diag.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(melt_diag_headers))
-            ws_melt_diag.cell(2, 1).alignment = Alignment(horizontal="left", vertical="center")
-
-        melt_diag_widths = {
-            "A": 15,
-            "B": 15,
-            "C": 11,
-            "D": 20,
-            "E": 18,
-            "F": 20,
-            "G": 15,
-            "H": 18,
-            "I": 18,
-            "J": 70,
-        }
-        for col, width in melt_diag_widths.items():
-            ws_melt_diag.column_dimensions[col].width = width
-        _apply_letter_portrait_layout(ws_melt_diag)
+        _write_melt_diagnostics_sheet(
+            ws_melt_diag,
+            melt_schedule,
+            day_dates,
+            mold_schedule_frame,
+            bold,
+            thin,
+        )
 
         wb.save(output_file)
         print(f"Saved: {output_file}")

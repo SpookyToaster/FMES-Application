@@ -1,6 +1,6 @@
 # FMES Roadmap
 
-**Last Updated:** August 10, 2026
+**Last Updated:** August 12, 2026
 
 ## Vision
 
@@ -43,26 +43,34 @@ Production conditions will change daily. The system should adapt rather than att
 - Boundary test suite for IO, filtering, building, export, melt planning, integration, and DB environment checks; live-DB tests split into `tests/integration/`
 - SQL scheduler input validation adjusted to allow blank Alloy while maintaining strict required-field checks for critical scheduling columns
 - Credential handling moved to local environment variables
-- Historical snapshot SQL schema and loader pipeline implemented ([HistoricalReporting_ERP_Exact.sql](HistoricalReporting_ERP_Exact.sql), [src/fmes/load_historical_snapshot.py](src/fmes/load_historical_snapshot.py))
+- Historical snapshot loader pipeline implemented ([src/fmes/load_historical_snapshot.py](src/fmes/load_historical_snapshot.py))
 - DB metadata discovery and dashboard data access methods implemented in [src/fmes/db_io.py](src/fmes/db_io.py), including a trimmed Job Number report projection and a full scheduler projection
 - ERP field mapping corrections: castings per mold from `JCJobMaster.TOOLIMPRESSIONS`; Total Pour WT derived when `POURQUANTITY` is unrecorded
-- Production-ready dashboard SQL query pack added in [Production_Report_Queries.sql](Production_Report_Queries.sql)
+- Production-ready dashboard SQL query support integrated into the scheduler data-access layer
 - Alloy compatibility master data with directional co-pour rules, integrated into scheduler input
 - Initial melt schedule builder ([src/fmes/melt_planning.py](src/fmes/melt_planning.py)) implementing the 5 planned + 1 reserved heat slot policy with overflow flagging
 - Excel export hardening: calcChain cleanup and native numeric cell writes
 - Dead-code cleanup pass (unused modules, placeholder configs, duplicate constants removed)
+- Scheduler export decomposition completed for current direction (sheet-specific writer helpers for mold and heat workbooks)
+- Combined workbook structure aligned to current planner workflow, including Mold Summary and Melt diagnostics support
+- End-to-end combined runtime path verified and stable for active operations
 
 ### In Progress
 
-- Schedule persistence model is still not in use for run-to-run carryforward
-- Planning model refinement in progress: heat-first with mold backfill, 10-week melt horizon, alloy-group-first batching, and planner preview tooling
-- Due-date-vs-grouping tradeoff review is in progress against live OOR data before further optimization
+- Reporting module expansion for operational and stakeholder reporting outputs
+- Automated emailer planning for production, order entry, and shipping notifications
+- Final scheduler-language/readability polish to support handoff into reporting phase
 
 ### Open Gaps
 
 - Persistent schedule state
 - Production WIP tracking
 - Automated reporting and BI publishing
+- Automated cert printing pilot and validation
+
+### Program Position
+
+The scheduler module is primarily complete for the current iteration and direction. Near-term roadmap execution now shifts to reporting, automated notification workflows, and downstream operational automation.
 
 ---
 
@@ -88,7 +96,7 @@ Production conditions will change daily. The system should adapt rather than att
 
 ## Phase 2 - Persistent Scheduling
 
-### Status: Not Started
+### Status: Planned (Deferred behind reporting expansion)
 
 ### Persistent Schedule State
 
@@ -190,23 +198,31 @@ LastModified
 
 ## Phase 4 - Reporting & Communication
 
-### Status: Not Started
+### Status: Next Active Expansion
 
 ### Automated Reporting
 
 - Generate and distribute scheduled reports
 - Reduce manual report creation
+- Standardize report packs by audience (production, order entry, shipping)
 
 ### Email Distribution System
 
 - Send reports to subscribed users
 - Support configurable distribution lists
 - Manage user-specific report preferences
+- Add notification triggers for production, order entry, and shipping events
 
 ### Preference Management
 
 - Store user preferences in SQL Server
 - Allow users to update preferences through email responses
+
+### Cert Printing Automation (Future Validation)
+
+- Define cert-print trigger points and required data payloads
+- Prototype automated cert print handoff from reporting/notification events
+- Validate print reliability and exception handling before production rollout
 
 ---
 
@@ -240,6 +256,6 @@ LastModified
 
 ## Next 3 Priorities
 
-1. Validate the current 10-week, alloy-group-first heat planner against live due-date behavior and refine the batching rules where urgency is harmed.
-2. Preserve prior run assignments to reduce schedule churn between runs.
-3. Expand planner diagnostics and alloy compatibility guardrails (group validation, unknown-alloy exceptions, preview/report integration).
+1. Build reporting functions and audience-specific outputs that package scheduler results for operations.
+2. Implement automated email notifications for production, order entry, and shipping, including list management and trigger rules.
+3. Design and begin controlled testing for automated cert printing workflow integration.

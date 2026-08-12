@@ -1,13 +1,13 @@
 # Foundry Management and Execution System (FMES)
 
 **Author:** Logan Burkardt  
-**Last Updated:** August 10, 2026
+**Last Updated:** August 12, 2026
 
 ---
 
 ## Overview
 
-Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that reads the Open Order Report, filters eligible jobs, expands them into extension rows, builds a heat-first pour plan, back-fills molding days from those heats, and exports formatted planner workbooks.
+Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that synchronizes the Open Order Report from SQL, filters eligible jobs, expands them into extension rows, builds mold and melt scheduling views, and exports the Production Schedule Summary workbook.
 
 The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.py) is the operational entrypoint (also used by PyInstaller), [src/fmes/main.py](src/fmes/main.py) provides the CLI, [src/fmes/scheduler.py](src/fmes/scheduler.py) provides architectural logic, and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
@@ -30,23 +30,29 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 - DB metadata/query helpers in [src/fmes/db_io.py](src/fmes/db_io.py) for table and column discovery
 - Trimmed Main dashboard report query (Job Number, Customer PO, quantities, ship date, value, pour/production fields) plus a full scheduler projection accessor
 - ERP field mapping corrections: castings per mold sourced from `JCJobMaster.TOOLIMPRESSIONS` (the "# on" field); Total Pour WT derived from pour weight × molds when `POURQUANTITY` is unrecorded
-- Production SQL report script in [Production_Report_Queries.sql](Production_Report_Queries.sql)
 - Alloy compatibility reference CSV with directional co-pour rules (`Compatibility Group`, `Compatible With ASTM Group`, `Specific Compatible Alloys`)
 - Initial melt schedule builder in [src/fmes/melt_planning.py](src/fmes/melt_planning.py) with the 5 planned + 1 reserved daily heat slot policy
 - Excel export hardening: calcChain cleanup (no repair prompt) and native numeric cell writes for OOR sync
+- Scheduler export modularization completed for current iteration direction (sheet-specific writers for heat/melt diagnostics and mold workbook tabs)
+- Combined workbook layout aligned to planner workflow (Mold Schedule, Heat Summary, Melt Schedule, Melt Summary, Mold Summary, diagnostics/support tabs)
+- Mold and melt schedule generation verified together through the main runtime path (`python run_scheduler.py --source sql`)
 
 ### In Progress
 
-- SQL Server integration beyond reporting reads (write-back schedule persistence)
-- Persistent schedule state between runs
-- Refining the heat-first planning model so alloy-group batching and due-date urgency stay balanced
-- Expanding planner-facing preview/diagnostic workflows so iteration can happen without full exports
+- Reporting module expansion (operational summaries and stakeholder-targeted report outputs)
+- Automated email distribution design for production, order entry, and shipping notifications
+- Final refinement pass on planner-facing wording, diagnostics, and workbook readability
 
 ### Not Started
 
+- Persistent schedule state between runs
 - Melt, casting, and cleaning schedule pipelines
-- Automated reporting and distribution
 - Power BI data publication pipeline
+- Automated cert printing validation and pilot testing
+
+### Current Iteration Position
+
+The scheduler module is primarily complete for the current iteration and direction. The active core path (SQL sync -> scheduling -> combined workbook export) is stable, modularized, and test-backed. Current development priority is shifting from scheduler-core construction to reporting and communication automation.
 
 ---
 
@@ -57,14 +63,14 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 - [run_scheduler.py](run_scheduler.py) is the canonical executable entrypoint (`python run_scheduler.py --source sql`).
 - [src/fmes/main.py](src/fmes/main.py) provides the CLI, logging setup, and export calls.
 - [src/fmes/scheduler.py](src/fmes/scheduler.py) coordinates the schedule-building pipeline as a library module.
-- It loads input, filters jobs, builds extension rows, applies a 10-week melt-planning horizon, builds the heat-first plan, back-fills molding days from the planned heats, and returns the data needed for mold and heat exports.
+- It loads input, filters jobs, builds extension rows, assigns mold scheduling days, derives melt schedule rows, and returns the data used by the final workbook export.
 
 ### Module Boundaries
 
 - [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) reads scheduler input (SQL or Excel) and syncs the Open Order Report workbook.
 - [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py) filters rows down to jobs eligible for molding.
 - [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py) expands jobs into extensions and back-fills molding days from the heat plan while enforcing molding capacity constraints.
-- [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) builds export blocks, prints them, and writes the Excel schedule file.
+- [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) builds export blocks, prints them, and writes the Production Schedule Summary workbook.
 - [src/fmes/scheduler_validation.py](src/fmes/scheduler_validation.py) validates SQL rows and writes missing-job audit logs.
 - [src/fmes/alloy_compatibility.py](src/fmes/alloy_compatibility.py) loads the compatibility CSV and evaluates directional co-pour rules.
 - [src/fmes/melt_planning.py](src/fmes/melt_planning.py) prioritizes due dates, applies alloy-group-first batching, assigns heat numbers, and builds the initial melt schedule (5 planned heats + 1 reserved slot).
@@ -75,24 +81,17 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 - [src/fmes/database.py](src/fmes/database.py) validates DB environment and opens SQL Server connections.
 - [src/fmes/db_io.py](src/fmes/db_io.py) provides metadata helpers (`list_tables`, `list_columns`) and callable report data methods (`get_main_dashboard_rows`, `get_main_dashboard_scheduler_rows`).
 - [src/fmes/load_historical_snapshot.py](src/fmes/load_historical_snapshot.py) loads ERP snapshot CSV data into SQL Server history tables.
-- [Production_Report_Queries.sql](Production_Report_Queries.sql) contains production-ready SQL for Orders and Main dashboard column sets.
 
 ### Tests
 
 Unit tests (no database required):
 
-- [tests/test_database.py](tests/test_database.py)
-- [tests/test_historical_loader.py](tests/test_historical_loader.py)
 - [tests/test_scheduler_io.py](tests/test_scheduler_io.py)
 - [tests/test_scheduler_filter.py](tests/test_scheduler_filter.py)
 - [tests/test_scheduler_build.py](tests/test_scheduler_build.py)
 - [tests/test_scheduler_export.py](tests/test_scheduler_export.py)
 - [tests/test_melt_planning.py](tests/test_melt_planning.py)
 - [tests/test_scheduler_integration.py](tests/test_scheduler_integration.py)
-
-Integration tests (require live DB credentials; excluded from default discovery):
-
-- [tests/integration/test_db_io.py](tests/integration/test_db_io.py)
 
 ---
 
@@ -126,10 +125,10 @@ Integration tests (require live DB credentials; excluded from default discovery)
 
 ### Planning Direction (Draft)
 
-- The active planning model is heat-first with mold backfill.
+- The active planning model is heat-first with mold backfill and is now considered the baseline scheduler approach for this iteration.
 - Melt input is intentionally limited to the next 10 weeks so far-out jobs do not consume early heat capacity.
 - Rows are grouped by alloy compatibility group before heat assignment to maximize useful heats within each alloy family.
-- Due-date urgency still drives priority windows, and the next refinement step is balancing urgency against same-group batching when the two conflict.
+- Due-date urgency drives priority windows; tuning now focuses on reporting clarity rather than major planning-model redesign.
 - Alloy co-pour decisions are driven by reference data rather than hardcoded alloy checks.
 
 ### Alloy Compatibility Reference Data
@@ -143,11 +142,7 @@ Integration tests (require live DB credentials; excluded from default discovery)
 
 - Builds daily schedule blocks.
 - Prints day-by-day mold totals.
-- Exports a formatted workbook named `Mold Schedule.xlsx`.
-- Exports `Heat Summary.xlsx` with:
-        - `Heat Summary` sheet (planner day blocks by pour day / heat)
-        - `Daily Heat Totals` sheet (heats/day + lbs/day + molds/day)
-- Supports non-export planning inspection through `run_heat_grouping_preview.py` for alloy-group and heat batching review.
+- Exports the final `Production Schedule Summary.xlsx` workbook with mold and melt planning tabs.
 
 ### Database Reporting Behavior
 
@@ -155,7 +150,6 @@ Integration tests (require live DB credentials; excluded from default discovery)
 - Supports callable Main dashboard extraction from the latest (or selected) `OrderSnapshot` run joined to OE order data by Job Number.
 - Castings per mold reads live from `JCJobMaster.TOOLIMPRESSIONS` because it is a near-static product attribute; snapshots may lag.
 - Total Pour WT falls back to pour weight × quantity of molds when the ERP `POURQUANTITY` has not been recorded yet.
-- Supports operational SQL execution from [Production_Report_Queries.sql](Production_Report_Queries.sql) for direct SSMS usage.
 
 ### Open Order Report Sync Workflow
 
@@ -201,7 +195,7 @@ build_schedule_dates()
 build_daily_export_blocks()
         │
         ▼
-export_mold_schedule() + export_heat_summary()
+export_combined_schedule_workbook()
 ```
 
 ---
@@ -239,18 +233,11 @@ This runs only:
 
 - `tests.test_melt_planning`
 - `tests.test_scheduler_integration`
-- `tests.test_mold_schedule_from_melt`
-
-To preview how melt input rows are grouped into alloy-based heats (without export), run:
-
-```powershell
-.venv\Scripts\python.exe run_heat_grouping_preview.py --source excel --max-detail-rows 80
-```
+- `tests.test_scheduler_build`
 
 Current working verification for fast planning iteration:
 
 - `.\run_fast_tests.ps1`
-- `python.exe .\run_heat_grouping_preview.py --source excel --max-detail-rows 80`
 
 The current suite covers:
 
@@ -262,7 +249,10 @@ The current suite covers:
 - export block generation and workbook writing
 - end-to-end orchestration
 
-Live-DB integration tests run separately: `python tests/integration/test_db_io.py`
+Most recent verification snapshot:
+
+- Retained regression suite: 49 tests passing
+- Live runtime smoke: `python run_scheduler.py --source sql` completed successfully and generated `Production Schedule Summary.xlsx`
 
 ---
 

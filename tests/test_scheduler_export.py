@@ -530,6 +530,7 @@ class SchedulerExportTests(unittest.TestCase):
                     {
                         Columns.COL_DUE_DATE: "2026-08-04",
                         "Customer Name": "Customer One",
+                        "Part Number": "P1",
                         Columns.COL_ALLOY: "LEW15",
                         Columns.COL_JOB_NUMBER: "5001",
                         "EXT": "A",
@@ -540,6 +541,7 @@ class SchedulerExportTests(unittest.TestCase):
                     {
                         Columns.COL_DUE_DATE: "2026-08-04",
                         "Customer Name": "Customer Two",
+                        "Part Number": "P2",
                         Columns.COL_ALLOY: "LEW15",
                         Columns.COL_JOB_NUMBER: "5002",
                         "EXT": "B",
@@ -572,6 +574,7 @@ class SchedulerExportTests(unittest.TestCase):
                     {
                         Columns.COL_DUE_DATE: "2026-08-05",
                         "Customer Name": "Customer Three",
+                        "Part Number": "P3",
                         Columns.COL_ALLOY: "LEW20",
                         Columns.COL_JOB_NUMBER: "5003",
                         "EXT": "C",
@@ -649,9 +652,11 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_melt_dept.cell(7, 5).value, "Job Number")
             self.assertEqual(ws_melt_dept.cell(7, 6).value, "Molds on Floor")
             self.assertEqual(ws_melt_dept.cell(7, 7).value, "Pour Weight Required (lbs)")
+            self.assertEqual(ws_melt_dept.cell(7, 8).value, "Part Number")
             self.assertEqual(ws_melt_dept.cell(8, 5).value, "5001")
             self.assertEqual(ws_melt_dept.cell(8, 6).value, 2)
             self.assertEqual(ws_melt_dept.cell(8, 7).value, 600)
+            self.assertEqual(ws_melt_dept.cell(8, 8).value, "P1")
             self.assertEqual(ws_melt_dept.cell(8, 3).alignment.horizontal, None)
             self.assertEqual(ws_melt_dept.cell(8, 6).alignment.horizontal, "center")
             self.assertEqual(ws_melt_dept.cell(8, 7).alignment.horizontal, "center")
@@ -770,18 +775,20 @@ class SchedulerExportTests(unittest.TestCase):
                 wb.sheetnames,
                 [
                     "Overall Summary",
-                    "Melt Summary",
                     "Melt Schedule",
                     "Melt Diagnostics",
                     "Mold Schedule",
+                    "Melt Summary",
+                    "Mold Summary",
                 ],
             )
             self.assertEqual(wb["Overall Summary"].cell(1, 1).value, "Job Number")
-            self.assertEqual(wb["Melt Summary"].cell(1, 1).value, "Pour Date")
             self.assertEqual(wb["Melt Schedule"].cell(5, 1).value, "Melt Schedule")
             self.assertEqual(wb["Melt Schedule"].cell(7, 1).value, "Pour Date")
             self.assertEqual(wb["Melt Diagnostics"].cell(1, 1).value, "Skipped Pour Day")
             self.assertEqual(wb["Mold Schedule"].cell(1, 1).value, "Mold Schedule")
+            self.assertEqual(wb["Melt Summary"].cell(1, 1).value, "Pour Date")
+            self.assertEqual(wb["Mold Summary"].cell(1, 1).value, "Job Number")
 
     def test_build_heat_daily_totals_rows(self):
         summary_rows = [
