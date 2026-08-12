@@ -44,7 +44,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["export_blocks"], {})
         self.assertIn("melt_schedule", result)
-        self.assertEqual(result["mold_day_dates"], {})
+        self.assertEqual(result["mold_day_dates"][1]["weekday"], "Tuesday")
         self.assertEqual(result["pour_day_dates"][1]["weekday"], "Tuesday")
         self.assertEqual(result["melt_schedule"][1]["rows"].iloc[0][Columns.COL_JOB_NUMBER], "9001")
 
@@ -192,7 +192,7 @@ class SchedulerIntegrationTests(unittest.TestCase):
 
         calendar_days = sorted(build_schedule_dates.call_args.args[0].keys())
         self.assertEqual(calendar_days, [1])
-        self.assertEqual(result["mold_day_dates"], {})
+        self.assertEqual(result["mold_day_dates"], {1: calendar[1]})
         self.assertEqual(result["pour_day_dates"], {1: calendar[1]})
 
 

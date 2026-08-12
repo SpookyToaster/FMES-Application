@@ -58,8 +58,17 @@ def main():
             day: assigned[pd.to_numeric(assigned["Schedule Day"], errors="coerce") == day].copy()
             for day in mold_days
         }
+        melt_schedule = {
+            day: {"rows": daily_schedules[day].copy()}
+            for day in mold_days
+        }
         export_blocks = build_daily_export_blocks(daily_schedules, mold_day_dates)
-        export_mold_schedule(export_blocks, output_file=args.output_file)
+        export_mold_schedule(
+            export_blocks,
+            output_file=args.output_file,
+            melt_schedule=melt_schedule,
+            day_dates=mold_day_dates,
+        )
 
         print_mold_schedule_console(assigned)
         print(f"\nSaved mold schedule workbook: {args.output_file}")

@@ -183,14 +183,47 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_job_status.cell(2, 1).value, "5001")
             self.assertEqual(ws_job_status.cell(2, 6).value, "YES")
 
-            ws_mgmt = wb["Mold Mgmt Summary"]
-            self.assertEqual(ws_mgmt.cell(1, 2).value, "Customer Name")
-            self.assertEqual(ws_mgmt.cell(1, 11).value, "Planner Diagnostic")
-            self.assertEqual(ws_mgmt.cell(5, 1).value, "Daily Mold Capacity")
-            self.assertEqual(ws_mgmt.cell(7, 1).value, "Day 1")
-            self.assertEqual(ws_mgmt.cell(7, 2).value, "L=2/30")
-            self.assertEqual(ws_mgmt.cell(7, 3).value, "F=0/3")
-            self.assertEqual(ws_mgmt.cell(8, 1).value, "Day 2")
+    def test_export_mold_schedule_includes_melt_sheet_when_data_is_provided(self):
+        frame = pd.DataFrame([
+            {
+                Columns.COL_DUE_DATE: "2026-08-04 00:00:00",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                Columns.COL_JOB_NUMBER: "5001",
+                "EXT": "",
+                Columns.COL_ALLOY: "A",
+                Columns.COL_CAST_TYPE: "L",
+                "Quantity of Molds": 1,
+                "Castings Per Mold": 1,
+                "Quantity of Cores": 0,
+                "Total Weight per EXT": 25,
+                "Molds for EXT": 2,
+                "Heat #": 42,
+            }
+        ])
+
+        export_blocks = {
+            1: {
+                "date": pd.Timestamp("2026-08-04"),
+                "weekday": "Tuesday",
+                "rows": frame,
+                "weight_total": 25,
+                "mold_total": 2,
+            }
+        }
+        melt_schedule = {
+            1: {"rows": frame}
+        }
+        day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "mold_schedule.xlsx"
+            export_mold_schedule(export_blocks, str(output_file), melt_schedule=melt_schedule, day_dates=day_dates)
+            wb = load_workbook(output_file)
+            self.assertIn("Melt Schedule", wb.sheetnames)
+            self.assertEqual(wb["Melt Schedule"].cell(1, 1).value, "Melt Schedule")
+            self.assertEqual(wb["Melt Schedule"].cell(5, 1).value, "Melt Schedule")
+            self.assertEqual(wb["Melt Schedule"].cell(7, 1).value, "Pour Date")
 
     def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
         schedule_data_frame = pd.DataFrame([
@@ -611,20 +644,21 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_melt_mgmt.cell(10, 3).value, "Lbs=500/10000")
 
             ws_melt_dept = wb["Melt Dept Schedule"]
-            self.assertEqual(ws_melt_dept.cell(1, 1).value, "Pour Date")
-            self.assertEqual(ws_melt_dept.cell(1, 5).value, "Job Number")
-            self.assertEqual(ws_melt_dept.cell(1, 8).value, "Job lbs")
-            self.assertEqual(ws_melt_dept.cell(1, 9).value, "Customer Name")
-            self.assertEqual(ws_melt_dept.cell(2, 8).value, 600)
-            self.assertEqual(ws_melt_dept.cell(2, 3).alignment.horizontal, "center")
-            self.assertEqual(ws_melt_dept.cell(2, 6).alignment.horizontal, "center")
-            self.assertEqual(ws_melt_dept.cell(2, 7).alignment.horizontal, "center")
-            self.assertEqual(ws_melt_dept.cell(4, 1).value, None)
-            self.assertEqual(ws_melt_dept.cell(5, 1).value.date().isoformat(), "2026-08-05")
-            self.assertNotEqual(
-                ws_melt_dept.cell(2, 1).fill.start_color.rgb,
-                ws_melt_dept.cell(3, 1).fill.start_color.rgb,
-            )
+            self.assertEqual(ws_melt_dept.cell(5, 1).value, "Melt Schedule")
+            self.assertEqual(ws_melt_dept.cell(7, 1).value, "Pour Date")
+            self.assertEqual(ws_melt_dept.cell(7, 5).value, "Job Number")
+            self.assertEqual(ws_melt_dept.cell(7, 6).value, "Molds on Floor")
+            self.assertEqual(ws_melt_dept.cell(7, 7).value, "Pour Weight Required (lbs)")
+            self.assertEqual(ws_melt_dept.cell(8, 5).value, "5001")
+            self.assertEqual(ws_melt_dept.cell(8, 6).value, 2)
+            self.assertEqual(ws_melt_dept.cell(8, 7).value, 600)
+            self.assertEqual(ws_melt_dept.cell(8, 3).alignment.horizontal, None)
+            self.assertEqual(ws_melt_dept.cell(8, 6).alignment.horizontal, "center")
+            self.assertEqual(ws_melt_dept.cell(8, 7).alignment.horizontal, "center")
+            self.assertEqual(ws_melt_dept.cell(8, 1).value.date().isoformat(), "2026-08-04")
+            self.assertEqual(ws_melt_dept.cell(12, 1).value, "Melt Schedule")
+            self.assertEqual(ws_melt_dept.cell(14, 1).value, "Pour Date")
+            self.assertEqual(ws_melt_dept.cell(15, 1).value, datetime(2026, 8, 5, 0, 0))
 
             ws_melt_diag = wb["Melt Diagnostics"]
             self.assertEqual(ws_melt_diag.cell(1, 1).value, "Skipped Pour Day")
@@ -737,7 +771,6 @@ class SchedulerExportTests(unittest.TestCase):
                 [
                     "Overall Summary",
                     "Melt Summary",
-                    "Mold Summary",
                     "Melt Schedule",
                     "Melt Diagnostics",
                     "Mold Schedule",
@@ -745,8 +778,8 @@ class SchedulerExportTests(unittest.TestCase):
             )
             self.assertEqual(wb["Overall Summary"].cell(1, 1).value, "Job Number")
             self.assertEqual(wb["Melt Summary"].cell(1, 1).value, "Pour Date")
-            self.assertEqual(wb["Mold Summary"].cell(1, 1).value, "Job Number")
-            self.assertEqual(wb["Melt Schedule"].cell(1, 1).value, "Pour Date")
+            self.assertEqual(wb["Melt Schedule"].cell(5, 1).value, "Melt Schedule")
+            self.assertEqual(wb["Melt Schedule"].cell(7, 1).value, "Pour Date")
             self.assertEqual(wb["Melt Diagnostics"].cell(1, 1).value, "Skipped Pour Day")
             self.assertEqual(wb["Mold Schedule"].cell(1, 1).value, "Mold Schedule")
 

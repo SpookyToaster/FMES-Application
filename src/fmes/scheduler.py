@@ -18,6 +18,7 @@ import os
 import pandas as pd
 
 from .config import Columns
+from .mold_console_schedule import build_mold_schedule_by_alloy_group
 from .scheduler_build import (
     build_schedule_dates,
     build_schedule_rows,
@@ -34,6 +35,16 @@ from .scheduler_io import read_file, sync_open_order_report_with_sql
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_max_jobs_per_day(default_value=10):
+    """Return mold day job cap from env with a safe integer fallback."""
+    raw_value = os.getenv("MOLD_SCHEDULE_MAX_JOBS_PER_DAY", str(default_value)).strip()
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default_value
+    return max(parsed, 1)
 
 
 def _build_seed_melt_schedule_from_sorted_groups(sorted_rows):
@@ -103,11 +114,64 @@ def schedule_molds():
 
         schedule_data_frame = pd.DataFrame(schedule_rows).copy()
 
-        logger.info("      Experimental mode: no legacy scheduling decisions are applied.")
-        logger.info("      Seeding export data from normalized rows.")
-        melt_schedule = _build_seed_melt_schedule_from_sorted_groups(schedule_data_frame)
-        mold_schedule_frame = pd.DataFrame()
-        mold_days = []
+        max_jobs_per_day = _resolve_max_jobs_per_day()
+        logger.info(
+            "      Building mold day assignments (max jobs/day: %s)...",
+            max_jobs_per_day,
+        )
+        mold_schedule_frame = build_mold_schedule_by_alloy_group(
+            schedule_rows_df=schedule_data_frame,
+            max_jobs_per_day=max_jobs_per_day,
+        )
+
+        if mold_schedule_frame.empty:
+            logger.info("      No mold day assignments were produced.")
+            melt_schedule = _build_seed_melt_schedule_from_sorted_groups(schedule_data_frame)
+            mold_days = []
+        else:
+            if "Pour Schedule Day" not in mold_schedule_frame.columns:
+                mold_schedule_frame["Pour Schedule Day"] = pd.to_numeric(
+                    mold_schedule_frame.get("Schedule Day"),
+                    errors="coerce",
+                )
+            else:
+                mold_schedule_frame["Pour Schedule Day"] = pd.to_numeric(
+                    mold_schedule_frame["Pour Schedule Day"],
+                    errors="coerce",
+                )
+
+            mold_schedule_frame["Pour Schedule Day"] = mold_schedule_frame[
+                "Pour Schedule Day"
+            ].fillna(pd.to_numeric(mold_schedule_frame.get("Schedule Day"), errors="coerce"))
+
+            if "Heat #" not in mold_schedule_frame.columns:
+                mold_schedule_frame["Heat #"] = 1
+            if "Global Heat #" not in mold_schedule_frame.columns:
+                mold_schedule_frame["Global Heat #"] = 1
+
+            mold_days = sorted(
+                pd.to_numeric(
+                    mold_schedule_frame["Schedule Day"],
+                    errors="coerce",
+                )
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+            daily_schedules = {
+                day: mold_schedule_frame[
+                    pd.to_numeric(mold_schedule_frame["Schedule Day"], errors="coerce") == day
+                ].copy()
+                for day in mold_days
+            }
+            melt_schedule = {
+                day: {
+                    "rows": daily_schedules[day].copy(),
+                    "heat_summary": pd.DataFrame(),
+                }
+                for day in mold_days
+            }
 
         pour_days = sorted(int(day) for day in melt_schedule.keys())
         all_days = mold_days + pour_days
@@ -123,7 +187,9 @@ def schedule_molds():
         pour_day_dates = {day: calendar[day] for day in pour_days}
 
         daily_schedules = {
-            day: mold_schedule_frame[mold_schedule_frame["Schedule Day"] == day].copy()
+            day: mold_schedule_frame[
+                pd.to_numeric(mold_schedule_frame["Schedule Day"], errors="coerce") == day
+            ].copy()
             for day in mold_days
         }
         export_blocks = build_daily_export_blocks(
