@@ -146,13 +146,13 @@ def _write_schedule_banner(ws, title, created_on, metric_label, metric_value, la
     ws.row_dimensions[3].height = 8
 
 
-def _apply_schedule_day_header(ws, row_num, column_count, fill=REPORT_HEADER_FILL):
+def _apply_schedule_day_header(ws, row_num, column_count, fill=REPORT_HEADER_FILL, wrap_text=False):
     """Apply consistent header styling to a day block header row."""
     _apply_fill_to_row(ws, row_num, column_count, fill)
     for col_num in range(1, column_count + 1):
         cell = ws.cell(row_num, col_num)
         cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=wrap_text)
 
 
 def _apply_schedule_total_row(ws, row_num, columns):
@@ -793,6 +793,43 @@ def _resolve_column_value(row, *candidates):
     return ""
 
 
+def _sort_rows_by_alloy(df, alloy_column, tie_breaker_columns=None):
+    """Return a copy of df sorted by alloy first, then any available tie-breakers."""
+    if df is None or df.empty:
+        return df
+
+    working_df = df.copy()
+    sort_columns = []
+
+    if alloy_column in working_df.columns:
+        alloy_sort_column = f"__{alloy_column}_sort__"
+        working_df[alloy_sort_column] = (
+            working_df[alloy_column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .replace("", "\uffff")
+        )
+        sort_columns.append(alloy_sort_column)
+
+    for column in tie_breaker_columns or []:
+        if column in working_df.columns and column not in sort_columns:
+            sort_columns.append(column)
+
+    if not sort_columns:
+        return working_df.reset_index(drop=True)
+
+    return working_df.sort_values(by=sort_columns, ascending=[True] * len(sort_columns), na_position="last").reset_index(drop=True).drop(columns=[col for col in working_df.columns if col.startswith("__") and col.endswith("_sort__")], errors="ignore")
+
+
+def _display_melt_date(day_value):
+    """Return the melt-sheet display date one day after the scheduled day."""
+    day_ts = _normalize_date_value(day_value)
+    if pd.isna(day_ts):
+        return pd.NaT
+    return day_ts + pd.Timedelta(days=1)
+
+
 def build_excel_rows(export_blocks):
     """
     Flatten export_blocks into a list of row lists for simple sequential writing.
@@ -857,13 +894,13 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
         created_on,
         "Average Poured Lbs / Day",
         "0.0",
-        10,
+        8,
     )
 
     melt_headers = [
         "Pour Date",
         "Weekday",
-        "Heat #",
+        "Heats",
         "Alloy",
         "Job Number",
         "Molds on Floor",
@@ -876,21 +913,30 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
         if day_rows.empty:
             continue
 
+        day_rows = _sort_rows_by_alloy(
+            day_rows,
+            Columns.COL_ALLOY,
+            [Columns.COL_JOB_NUMBER, "EXT", "Heat #"],
+        )
+
+        display_date = _display_melt_date(day_dates.get(day, {}).get("date", pd.NaT))
+
         ws.cell(current_row, 1, "Melt Schedule")
-        ws.cell(current_row, 2, day_dates.get(day, {}).get("date", "").strftime("%m/%d/%Y") if day_dates.get(day, {}).get("date") is not None else "")
+        ws.cell(current_row, 2, display_date.strftime("%m/%d/%Y") if not pd.isna(display_date) else "")
         ws.cell(current_row, 4, day_dates.get(day, {}).get("weekday", ""))
 
         for col in range(1, 9):
             ws.cell(current_row, col).font = bold
             ws.cell(current_row, col).fill = day_title_fill
-        ws.row_dimensions[current_row].height = 20
+            ws.cell(current_row, col).alignment = Alignment(wrap_text=True)
+        ws.row_dimensions[current_row].height = 30
         current_row += 2
 
         for col_num, header in enumerate(melt_headers, start=1):
             cell = ws.cell(current_row, col_num, header)
             cell.border = thin
             cell.font = bold
-        _apply_schedule_day_header(ws, current_row, len(melt_headers))
+        _apply_schedule_day_header(ws, current_row, len(melt_headers), wrap_text=True)
         current_row += 1
 
         for _, planned_row in day_rows.iterrows():
@@ -904,9 +950,9 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
                 weight_numeric = 0
 
             values = [
-                _normalize_due_date(day_dates.get(day, {}).get("date", pd.NaT)),
+                _display_melt_date(day_dates.get(day, {}).get("date", pd.NaT)),
                 day_dates.get(day, {}).get("weekday", ""),
-                planned_row.get("Heat #", ""),
+                "",
                 str(planned_row.get(Columns.COL_ALLOY, "") or "").strip(),
                 str(planned_row.get(Columns.COL_JOB_NUMBER, "") or "").strip(),
                 molds_numeric,
@@ -990,8 +1036,9 @@ def _write_mold_schedule_sheet(ws, export_blocks, created_on, bold, thin):
             cell = ws.cell(current_row, col_num, header)
             cell.border = thin
             cell.font = bold
+            cell.alignment = Alignment(wrap_text=True)
 
-        _apply_schedule_day_header(ws, current_row, len(headers))
+        _apply_schedule_day_header(ws, current_row, len(headers), wrap_text=True)
         current_row += 1
 
         for _, row in block["rows"].iterrows():
@@ -1023,11 +1070,11 @@ def _write_mold_schedule_sheet(ws, export_blocks, created_on, bold, thin):
 
     widths = {
         "A": 20,
-        "B": 13,
-        "C": 11,
-        "D": 11,
-        "E": 10,
-        "F": 5,
+        "B": 20,
+        "C": 12,
+        "D": 12,
+        "E": 12,
+        "F": 8,
         "G": 10,
         "H": 10,
         "I": 13,
@@ -2042,6 +2089,12 @@ def export_heat_summary(
         if not summary_df.empty:
             grouped = summary_df.groupby(["Schedule Date", "Weekday"], sort=True)
             for (schedule_date, weekday), day_df in grouped:
+                day_df = _sort_rows_by_alloy(
+                    day_df,
+                    "Anchor Alloy",
+                    ["Heat Slot", "Heat #"],
+                )
+
                 ws.cell(current_row, 1, "Heat Schedule")
                 ws.cell(current_row, 2, schedule_date)
                 ws.cell(current_row, 4, weekday)

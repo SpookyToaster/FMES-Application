@@ -163,6 +163,7 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(7, 1).value, "Customer Name")
             self.assertEqual(ws.cell(7, 8).value, "Quantity of Cores")
             self.assertEqual(ws.cell(7, 10).value, "Number of Molds Today")
+            self.assertTrue(ws.cell(7, 1).alignment.wrap_text)
             self.assertEqual(ws.cell(8, 1).value, "Customer")
             self.assertEqual(ws.cell(8, 10).value, 2)
             self.assertEqual(ws.cell(1, 1).value, "Mold Schedule")
@@ -222,8 +223,10 @@ class SchedulerExportTests(unittest.TestCase):
             wb = load_workbook(output_file)
             self.assertIn("Melt Schedule", wb.sheetnames)
             self.assertEqual(wb["Melt Schedule"].cell(1, 1).value, "Melt Schedule")
+            self.assertIn("A1:H1", {str(merged_range) for merged_range in wb["Melt Schedule"].merged_cells.ranges})
             self.assertEqual(wb["Melt Schedule"].cell(5, 1).value, "Melt Schedule")
             self.assertEqual(wb["Melt Schedule"].cell(7, 1).value, "Pour Date")
+            self.assertEqual(wb["Melt Schedule"].cell(8, 1).value.date().isoformat(), "2026-08-05")
 
     def test_build_job_shipping_report_rows_marks_not_yet_scheduled(self):
         schedule_data_frame = pd.DataFrame([
@@ -483,7 +486,7 @@ class SchedulerExportTests(unittest.TestCase):
                         "Heat Status": "Planned",
                         "Planning Priority": "Highest Priority",
                         "Review Window": "Next 2 Weeks",
-                        "Anchor Alloy": "LEW15",
+                        "Anchor Alloy": "WCB",
                         "Compatibility Group": "A216",
                         "Earliest Due Date": pd.Timestamp("2026-08-04").date(),
                         "Latest Due Date": pd.Timestamp("2026-08-04").date(),
@@ -494,7 +497,7 @@ class SchedulerExportTests(unittest.TestCase):
                         "Extensions": "5001-A",
                     },
                     {
-                        "Heat Slot": "",
+                        "Heat Slot": 2,
                         "Heat #": 2,
                         "Heat Status": "Overflow",
                         "Planning Priority": "Highest Priority",
@@ -607,8 +610,11 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(5, 1).value, "Heat Schedule")
             self.assertEqual(ws.cell(7, 1).value, "Schedule Date")
             self.assertEqual(ws.cell(7, 3).value, "Heat Slot")
-            self.assertEqual(ws.cell(8, 3).value, 1)
+            self.assertEqual(ws.cell(8, 3).value, 2)
             self.assertEqual(ws.cell(8, 8).value, "LEW15")
+            self.assertEqual(ws.cell(9, 3).value, 1)
+            self.assertEqual(ws.cell(9, 8).value, "WCB")
+            self.assertEqual(ws.cell(10, 3).value, 6)
             self.assertEqual(ws.cell(7, 20).value, "Max Mold Lead Days")
             self.assertEqual(ws.cell(7, 21).value, "Avg Mold Lead Days")
             self.assertEqual(ws.cell(7, 22).value, "Two Week Rule Status")
@@ -618,7 +624,7 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws.cell(8, 22).fill.start_color.rgb, "00FFC7CE")
             self.assertEqual(
                 ws.cell(8, 24).value,
-                "5001-A | Due 08/04/2026 | Molds 2",
+                "5002-B | Due 08/04/2026 | Molds 1",
             )
 
             ws_planner = wb["Heat Planner"]
@@ -648,7 +654,9 @@ class SchedulerExportTests(unittest.TestCase):
 
             ws_melt_dept = wb["Melt Dept Schedule"]
             self.assertEqual(ws_melt_dept.cell(5, 1).value, "Melt Schedule")
+            self.assertIn("A1:H1", {str(merged_range) for merged_range in ws_melt_dept.merged_cells.ranges})
             self.assertEqual(ws_melt_dept.cell(7, 1).value, "Pour Date")
+            self.assertTrue(ws_melt_dept.cell(7, 1).alignment.wrap_text)
             self.assertEqual(ws_melt_dept.cell(7, 5).value, "Job Number")
             self.assertEqual(ws_melt_dept.cell(7, 6).value, "Molds on Floor")
             self.assertEqual(ws_melt_dept.cell(7, 7).value, "Pour Weight Required (lbs)")
@@ -660,10 +668,10 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_melt_dept.cell(8, 3).alignment.horizontal, None)
             self.assertEqual(ws_melt_dept.cell(8, 6).alignment.horizontal, "center")
             self.assertEqual(ws_melt_dept.cell(8, 7).alignment.horizontal, "center")
-            self.assertEqual(ws_melt_dept.cell(8, 1).value.date().isoformat(), "2026-08-04")
+            self.assertEqual(ws_melt_dept.cell(8, 1).value.date().isoformat(), "2026-08-05")
             self.assertEqual(ws_melt_dept.cell(12, 1).value, "Melt Schedule")
             self.assertEqual(ws_melt_dept.cell(14, 1).value, "Pour Date")
-            self.assertEqual(ws_melt_dept.cell(15, 1).value, datetime(2026, 8, 5, 0, 0))
+            self.assertEqual(ws_melt_dept.cell(15, 1).value, datetime(2026, 8, 6, 0, 0))
 
             ws_melt_diag = wb["Melt Diagnostics"]
             self.assertEqual(ws_melt_diag.cell(1, 1).value, "Skipped Pour Day")
