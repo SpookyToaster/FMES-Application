@@ -9,7 +9,7 @@
 
 Foundry Management and Execution System (FMES) is a Python-based mold and pour planning tool that synchronizes the Open Order Report from SQL, filters eligible jobs, expands them into extension rows, builds mold and melt scheduling views, and exports the Production Schedule Summary workbook.
 
-The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.py) is the operational entrypoint (also used by PyInstaller), [src/fmes/main.py](src/fmes/main.py) provides the CLI, [src/fmes/scheduler.py](src/fmes/scheduler.py) provides architectural logic, and the core work lives in dedicated modules for input, filtering, schedule building, and export.
+The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.py) is the operational entrypoint (also used by PyInstaller), [run_oor_schedule.py](run_oor_schedule.py) is a dedicated OOR-only entrypoint that skips SQL sync/export, [src/fmes/main.py](src/fmes/main.py) provides the CLI, [src/fmes/scheduler.py](src/fmes/scheduler.py) provides architectural logic, and the core work lives in dedicated modules for input, filtering, schedule building, and export.
 
 ---
 
@@ -61,6 +61,7 @@ The scheduler module is primarily complete for the current iteration and directi
 ### Orchestration
 
 - [run_scheduler.py](run_scheduler.py) is the canonical executable entrypoint (`python run_scheduler.py --source sql`).
+- [run_oor_schedule.py](run_oor_schedule.py) is the dedicated OOR-only launcher (`python run_oor_schedule.py`) and always uses the current Open Order Report workbook as input.
 - [src/fmes/main.py](src/fmes/main.py) provides the CLI, logging setup, and export calls.
 - [src/fmes/scheduler.py](src/fmes/scheduler.py) coordinates the schedule-building pipeline as a library module.
 - It loads input, filters jobs, builds extension rows, assigns mold scheduling days, derives melt schedule rows, and returns the data used by the final workbook export.
@@ -238,6 +239,12 @@ This runs only:
 Current working verification for fast planning iteration:
 
 - `.\run_fast_tests.ps1`
+
+Run only from the existing Open Order Report workbook (no SQL sync/export step):
+
+```powershell
+.venv\Scripts\python.exe run_oor_schedule.py --no-pause
+```
 
 The current suite covers:
 
