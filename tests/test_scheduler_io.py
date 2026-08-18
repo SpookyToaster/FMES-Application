@@ -412,6 +412,13 @@ class SchedulerIOTests(unittest.TestCase):
 
             synced_wb = load_workbook(source_path)
             synced_ws = synced_wb["OOR"]
+            self.assertEqual(
+                synced_ws.cell(row=2, column=2).value,
+                "=IF(ISTEXT(VLOOKUP($J2,'https://monettmetalsus1-my.sharepoint.com/personal/"
+                "lburkardt_monettmetals_com/Documents/Quality/Schedule/Output/"
+                "[Production Schedule Summary.xlsx]Mold Schedule'!$C$2:$C$1048576,1,FALSE)),"
+                '"YES","NO")',
+            )
             self.assertEqual(synced_ws.cell(row=2, column=6).value, "2026-08-04")
             self.assertEqual(synced_ws.cell(row=2, column=7).value, "Customer A")
             self.assertEqual(synced_ws.cell(row=2, column=13).value, 10)
@@ -422,7 +429,7 @@ class SchedulerIOTests(unittest.TestCase):
             self.assertEqual(synced_ws.cell(row=2, column=18).value, 500)
             self.assertEqual(synced_ws.cell(row=2, column=19).value, 1000)
             self.assertEqual(synced_ws.cell(row=2, column=21).value, 3)
-            self.assertEqual(synced_ws.cell(row=2, column=22).value, "1")
+            self.assertEqual(synced_ws.cell(row=2, column=22).value, 1)
             self.assertEqual(synced_ws.cell(row=3, column=6).value, "")
             synced_wb.close()
 

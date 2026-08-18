@@ -21,8 +21,15 @@ XR3_NS = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"
 X14AC_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"
 CALC_CHAIN_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"
 
-# SQL_MAIN_EXPORT_COLUMNS offsets that map to OOR columns M,N,O,P,Q,R,S,U.
-NUMERIC_SQL_COLUMN_OFFSETS = {7, 8, 9, 10, 11, 12, 13, 15}
+# SQL_MAIN_EXPORT_COLUMNS offsets that map to OOR columns M,N,O,P,Q,R,S,U,V.
+NUMERIC_SQL_COLUMN_OFFSETS = {7, 8, 9, 10, 11, 12, 13, 15, 16}
+
+OOR_STATUS_FORMULA_TEMPLATE = (
+    "=IF(ISTEXT(VLOOKUP($J{row},"
+    "'https://monettmetalsus1-my.sharepoint.com/personal/lburkardt_monettmetals_com/"
+    "Documents/Quality/Schedule/Output/[Production Schedule Summary.xlsx]Mold Schedule'!"
+    "$C$2:$C$1048576,1,FALSE)),\"YES\",\"NO\")"
+)
 
 
 def to_plain_text(value):
@@ -225,6 +232,18 @@ def _set_cell_number(cell, value):
     value_node.text = number_text
 
 
+def _set_cell_formula(cell, formula_text):
+    """Replace cell contents with a formula node and clear stale value state."""
+    for child in list(cell):
+        cell.remove(child)
+
+    if "t" in cell.attrib:
+        del cell.attrib["t"]
+
+    formula_node = ET.SubElement(cell, f"{{{XML_NS}}}f")
+    formula_node.text = formula_text.lstrip("=")
+
+
 def restore_ignorable_namespace_declarations(xml_bytes):
     """
     Restore namespace declarations referenced by Ignorable after ET serialization.
@@ -298,6 +317,7 @@ def export_worksheet_values(source_workbook_path, sheet_name, output_path):
 def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_columns, sheet_name="OOR"):
     """Overwrite OOR F:V values by editing sheet XML directly to preserve workbook metadata."""
     start_row = 2
+    status_col = 2
     start_col = 6
     end_col = 22
 
@@ -317,6 +337,8 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
         if max_existing_row >= start_row:
             for row_idx in range(start_row, max_existing_row + 1):
                 row_element = _find_or_create_row(sheet_data, row_idx)
+                status_cell = _find_or_create_cell(row_element, row_idx, status_col)
+                _set_cell_plain_text(status_cell, "")
                 for col_idx in range(start_col, end_col + 1):
                     cell = _find_or_create_cell(row_element, row_idx, col_idx)
                     _set_cell_plain_text(cell, "")
@@ -324,6 +346,8 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
         for offset, sql_row in enumerate(sql_rows):
             row_idx = start_row + offset
             row_element = _find_or_create_row(sheet_data, row_idx)
+            status_cell = _find_or_create_cell(row_element, row_idx, status_col)
+            _set_cell_formula(status_cell, OOR_STATUS_FORMULA_TEMPLATE.format(row=row_idx))
             for col_offset, col_name in enumerate(sql_main_export_columns):
                 col_idx = start_col + col_offset
                 cell = _find_or_create_cell(row_element, row_idx, col_idx)
