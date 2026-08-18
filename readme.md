@@ -45,6 +45,11 @@ The program uses a `src/fmes` package layout. [run_scheduler.py](run_scheduler.p
 
 ### Not Started
 
+- Formatting in Excel
+- Mold Count is incorrect
+- Scheduled is defaulting to "No"
+- Molds completed needs converted to number so calcs update
+
 - Persistent schedule state between runs
 - Melt, casting, and cleaning schedule pipelines
 - Power BI data publication pipeline
