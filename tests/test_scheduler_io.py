@@ -393,7 +393,7 @@ class SchedulerIOTests(unittest.TestCase):
                     "Total Value": 1000,
                     "Heat No Assigned": "H1",
                     "Castings Produced": 3,
-                    "Molds Completed": 1,
+                    "Molds Completed": "",
                 }
             ]
 
@@ -429,7 +429,7 @@ class SchedulerIOTests(unittest.TestCase):
             self.assertEqual(synced_ws.cell(row=2, column=18).value, 500)
             self.assertEqual(synced_ws.cell(row=2, column=19).value, 1000)
             self.assertEqual(synced_ws.cell(row=2, column=21).value, 3)
-            self.assertEqual(synced_ws.cell(row=2, column=22).value, 1)
+            self.assertEqual(synced_ws.cell(row=2, column=22).value, 0)
             self.assertEqual(synced_ws.cell(row=3, column=6).value, "")
             synced_wb.close()
 

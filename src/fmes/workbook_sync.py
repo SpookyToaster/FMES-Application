@@ -23,6 +23,7 @@ CALC_CHAIN_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/rel
 
 # SQL_MAIN_EXPORT_COLUMNS offsets that map to OOR columns M,N,O,P,Q,R,S,U,V.
 NUMERIC_SQL_COLUMN_OFFSETS = {7, 8, 9, 10, 11, 12, 13, 15, 16}
+MOLDS_COMPLETED_COLUMN = "Molds Completed"
 
 OOR_STATUS_FORMULA_TEMPLATE = (
     "=IF(ISTEXT(VLOOKUP($J{row},"
@@ -352,6 +353,8 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
                 col_idx = start_col + col_offset
                 cell = _find_or_create_cell(row_element, row_idx, col_idx)
                 value = sql_row.get(col_name, "")
+                if col_name == MOLDS_COMPLETED_COLUMN and (value is None or pd.isna(value) or str(value).strip() == ""):
+                    value = 0
                 if col_offset in NUMERIC_SQL_COLUMN_OFFSETS:
                     _set_cell_number(cell, value)
                 else:
