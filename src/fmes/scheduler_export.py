@@ -830,6 +830,13 @@ def _display_melt_date(day_value):
     return day_ts + pd.Timedelta(days=1)
 
 
+def _normalize_heat_identifier(value):
+    """Return a stable text key for heat comparison, preserving blanks."""
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
 def build_excel_rows(export_blocks):
     """
     Flatten export_blocks into a list of row lists for simple sequential writing.
@@ -939,15 +946,27 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
         _apply_schedule_day_header(ws, current_row, len(melt_headers), wrap_text=True)
         current_row += 1
 
+        current_heat_key = None
+        molds_on_floor_running = 0
+
         for _, planned_row in day_rows.iterrows():
             molds_value = planned_row.get("Molds for EXT", 0)
             weight_value = planned_row.get("Total Weight per EXT", 0)
             molds_numeric = pd.to_numeric(molds_value, errors="coerce")
             if pd.isna(molds_numeric):
                 molds_numeric = 0
+            molds_numeric = int(round(float(molds_numeric)))
             weight_numeric = pd.to_numeric(weight_value, errors="coerce")
             if pd.isna(weight_numeric):
                 weight_numeric = 0
+
+            heat_key = _normalize_heat_identifier(planned_row.get("Heat #", ""))
+            if heat_key != current_heat_key:
+                molds_on_floor_running = 0
+                current_heat_key = heat_key
+
+            molds_on_floor_value = molds_on_floor_running
+            molds_on_floor_running += max(molds_numeric, 0)
 
             values = [
                 _display_melt_date(day_dates.get(day, {}).get("date", pd.NaT)),
@@ -955,7 +974,7 @@ def _write_day_blocked_melt_sheet(ws, melt_schedule, day_dates, header_title, cr
                 "",
                 str(planned_row.get(Columns.COL_ALLOY, "") or "").strip(),
                 str(planned_row.get(Columns.COL_JOB_NUMBER, "") or "").strip(),
-                molds_numeric,
+                molds_on_floor_value,
                 weight_numeric,
                 str(planned_row.get("Part Number", "") or "").strip(),
             ]

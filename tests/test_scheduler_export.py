@@ -662,7 +662,7 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(ws_melt_dept.cell(7, 7).value, "Pour Weight Required (lbs)")
             self.assertEqual(ws_melt_dept.cell(7, 8).value, "Part Number")
             self.assertEqual(ws_melt_dept.cell(8, 5).value, "5001")
-            self.assertEqual(ws_melt_dept.cell(8, 6).value, 2)
+            self.assertEqual(ws_melt_dept.cell(8, 6).value, 0)
             self.assertEqual(ws_melt_dept.cell(8, 7).value, 600)
             self.assertEqual(ws_melt_dept.cell(8, 8).value, "P1")
             self.assertEqual(ws_melt_dept.cell(8, 3).alignment.horizontal, None)
@@ -680,6 +680,93 @@ class SchedulerExportTests(unittest.TestCase):
                 ws_melt_diag.cell(2, 1).value,
                 "No skipped pour days detected in the current melt schedule range.",
             )
+
+    def test_melt_dept_schedule_resets_molds_on_floor_when_heat_changes(self):
+        melt_schedule = {
+            1: {
+                "heat_summary": pd.DataFrame([
+                    {
+                        "Heat Slot": 1,
+                        "Heat #": 1,
+                        "Heat Status": "Planned",
+                        "Planning Priority": "Highest Priority",
+                        "Review Window": "Next 2 Weeks",
+                        "Anchor Alloy": "LEW15",
+                        "Compatibility Group": "A216",
+                        "Earliest Due Date": pd.Timestamp("2026-08-04").date(),
+                        "Latest Due Date": pd.Timestamp("2026-08-04").date(),
+                        "Total Weight (lbs)": 1300,
+                        "Total Molds": 5,
+                        "Rows in Heat": 2,
+                        "Jobs": "5001,5002",
+                        "Extensions": "5001-A,5002-B",
+                    },
+                    {
+                        "Heat Slot": 2,
+                        "Heat #": 2,
+                        "Heat Status": "Planned",
+                        "Planning Priority": "Highest Priority",
+                        "Review Window": "Next 2 Weeks",
+                        "Anchor Alloy": "LEW15",
+                        "Compatibility Group": "A216",
+                        "Earliest Due Date": pd.Timestamp("2026-08-04").date(),
+                        "Latest Due Date": pd.Timestamp("2026-08-04").date(),
+                        "Total Weight (lbs)": 500,
+                        "Total Molds": 1,
+                        "Rows in Heat": 1,
+                        "Jobs": "5003",
+                        "Extensions": "5003-C",
+                    },
+                ]),
+                "rows": pd.DataFrame([
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        "Customer Name": "Customer One",
+                        "Part Number": "P1",
+                        Columns.COL_ALLOY: "LEW15",
+                        Columns.COL_JOB_NUMBER: "5001",
+                        "EXT": "A",
+                        "Molds for EXT": 2,
+                        "Total Weight per EXT": 600,
+                        "Heat #": 1,
+                    },
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        "Customer Name": "Customer Two",
+                        "Part Number": "P2",
+                        Columns.COL_ALLOY: "LEW15",
+                        Columns.COL_JOB_NUMBER: "5002",
+                        "EXT": "B",
+                        "Molds for EXT": 3,
+                        "Total Weight per EXT": 700,
+                        "Heat #": 1,
+                    },
+                    {
+                        Columns.COL_DUE_DATE: "2026-08-04",
+                        "Customer Name": "Customer Three",
+                        "Part Number": "P3",
+                        Columns.COL_ALLOY: "LEW15",
+                        Columns.COL_JOB_NUMBER: "5003",
+                        "EXT": "C",
+                        "Molds for EXT": 1,
+                        "Total Weight per EXT": 500,
+                        "Heat #": 2,
+                    },
+                ]),
+            }
+        }
+        day_dates = {1: {"date": pd.Timestamp("2026-08-04"), "weekday": "Tuesday"}}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "heat_summary_reset.xlsx"
+            export_heat_summary(melt_schedule, day_dates, str(output_file))
+
+            wb = load_workbook(output_file)
+            ws_melt_dept = wb["Melt Dept Schedule"]
+            self.assertEqual(ws_melt_dept.cell(8, 6).value, 0)
+            self.assertEqual(ws_melt_dept.cell(9, 6).value, 2)
+            self.assertEqual(ws_melt_dept.cell(10, 6).value, 0)
+            wb.close()
 
     def test_export_heat_summary_creates_missing_parent_directory(self):
         melt_schedule = {
