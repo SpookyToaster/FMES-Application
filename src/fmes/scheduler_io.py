@@ -5,6 +5,8 @@ Currently handles reading the Open Order Report Excel workbook that is
 exported from the ERP system and placed in the shared OneDrive folder.
 """
 
+import math
+import logging
 from pathlib import Path
 import shutil
 
@@ -23,6 +25,9 @@ from .workbook_sync import (
     save_sql_snapshot,
     write_sql_data_to_oor,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_OPEN_ORDER_REPORT_PATH = str(Paths.OPEN_ORDER_REPORT)
@@ -125,25 +130,74 @@ def sync_open_order_report_with_sql(
     sql_rows = get_main_dashboard_scheduler_rows()
     sql_rows = _exclude_rows_by_customer_name(sql_rows)
     sql_rows = validate_sql_rows(sql_rows)
+    normalized_rows = _normalize_sql_rows(sql_rows).to_dict(orient="records")
 
-    write_sql_data_to_oor(source_path, sql_rows, SQL_MAIN_EXPORT_COLUMNS, sheet_name="OOR")
+    write_sql_data_to_oor(source_path, normalized_rows, SQL_MAIN_EXPORT_COLUMNS, sheet_name="OOR")
 
     db_snapshot_path = Path(db_snapshot_dir) / (
         f"DB-Snapshot-{timestamp.strftime('%Y-%m-%d_%H%M%S')}.xlsx"
     )
-    save_sql_snapshot(sql_rows, SQL_MAIN_EXPORT_COLUMNS, db_snapshot_path)
+    save_sql_snapshot(normalized_rows, SQL_MAIN_EXPORT_COLUMNS, db_snapshot_path)
 
     return {
         "backup_path": str(backup_path),
         "historical_oor_path": str(historical_oor_path),
         "db_snapshot_path": str(db_snapshot_path),
-        "row_count": len(sql_rows),
+        "row_count": len(normalized_rows),
     }
 
 
 def _coerce_numeric(series_like):
     """Return numeric Series with NaN converted to 0."""
     return pd.to_numeric(series_like, errors="coerce").fillna(0)
+
+
+def _derive_mold_quantity_from_ordered(frame, quantity_of_molds):
+    """Backfill mold quantity from ordered castings when job master molds are zero."""
+    if "QTY Ordered" not in frame.columns or "Castings Per Mold" not in frame.columns:
+        return quantity_of_molds, pd.Series(False, index=frame.index)
+
+    qty_ordered = _coerce_numeric(frame["QTY Ordered"])
+    castings_per_mold = _coerce_numeric(frame["Castings Per Mold"])
+
+    fallback_values = (qty_ordered / castings_per_mold.replace(0, pd.NA)).fillna(0)
+    fallback_values = fallback_values.apply(
+        lambda value: int(math.ceil(float(value))) if float(value) > 0 else 0
+    )
+
+    fallback_mask = (quantity_of_molds <= 0) & (castings_per_mold > 0) & (qty_ordered > 0)
+    derived_quantity = quantity_of_molds.where(~fallback_mask, fallback_values)
+    return derived_quantity, fallback_mask
+
+
+def _log_mold_quantity_fallback_usage(frame, fallback_mask):
+    """Emit an audit log for jobs that used fallback mold derivation."""
+    fallback_count = int(fallback_mask.sum())
+    if fallback_count <= 0:
+        logger.info("      Mold quantity fallback applied to 0 jobs.")
+        return
+
+    if Columns.COL_JOB_NUMBER in frame.columns:
+        sample_jobs = (
+            frame.loc[fallback_mask, Columns.COL_JOB_NUMBER]
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .head(12)
+            .tolist()
+        )
+    else:
+        sample_jobs = []
+
+    if sample_jobs:
+        logger.info(
+            "      Mold quantity fallback applied to %s jobs (sample: %s).",
+            fallback_count,
+            ", ".join(sample_jobs),
+        )
+    else:
+        logger.info("      Mold quantity fallback applied to %s jobs.", fallback_count)
 
 
 def _normalize_sql_rows(raw_rows):
@@ -168,7 +222,10 @@ def _normalize_sql_rows(raw_rows):
         frame["Quantity of Molds"] = 0
 
     quantity_of_molds = _coerce_numeric(frame["Quantity of Molds"])
+    quantity_of_molds, fallback_mask = _derive_mold_quantity_from_ordered(frame, quantity_of_molds)
     molds_completed = _coerce_numeric(frame["Molds Completed"])
+
+    _log_mold_quantity_fallback_usage(frame, fallback_mask)
 
     frame["Quantity of Molds"] = quantity_of_molds
     frame["Molds Completed"] = molds_completed

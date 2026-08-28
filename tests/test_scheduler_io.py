@@ -77,6 +77,31 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["Hold"], "NO")
         self.assertEqual(frame.iloc[0]["Scheduled"], "NO")
 
+    def test_read_file_sql_derives_molds_when_quantity_of_molds_is_zero(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "QTY Ordered": 21,
+                "Quantity of Molds": 0,
+                "Castings Per Mold": 4,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+                "Molds Completed": 1,
+            }
+        ]
+
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Quantity of Molds"], 6)
+        self.assertEqual(frame.iloc[0]["Molds Needed"], 5)
+
     def test_read_file_sql_wraps_failures(self):
         with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):
             with self.assertRaises(RuntimeError) as context:
@@ -438,6 +463,57 @@ class SchedulerIOTests(unittest.TestCase):
             header_values = [snapshot_ws.cell(row=1, column=i + 1).value for i in range(len(SQL_MAIN_EXPORT_COLUMNS))]
             self.assertEqual(header_values, SQL_MAIN_EXPORT_COLUMNS)
             snapshot_wb.close()
+
+    def test_sync_open_order_report_with_sql_derives_quantity_of_molds_for_oor_column_n(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_path = temp_path / "Open Order Report.xlsx"
+            backup_dir = temp_path / "Backups"
+            hist_dir = temp_path / "Historical OORs"
+            snap_dir = temp_path / "Historical DB Snapshots"
+
+            workbook = Workbook()
+            ws = workbook.active
+            ws.title = "OOR"
+            for idx in range(1, 23):
+                ws.cell(row=1, column=idx).value = f"H{idx}"
+            workbook.save(source_path)
+
+            sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Customer A",
+                    "Part Number": "P1",
+                    "Job Type": "JOB",
+                    "Job Number": "9001",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 21,
+                    "Quantity of Molds": 0,
+                    "Castings Per Mold": 4,
+                    "Quantity of Cores": 1,
+                    "Pour Weight": 100,
+                    "Total Pour WT": 500,
+                    "Total Value": 1000,
+                    "Heat No Assigned": "H1",
+                    "Castings Produced": 3,
+                    "Molds Completed": 0,
+                }
+            ]
+
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+                sync_open_order_report_with_sql(
+                    source_workbook_path=str(source_path),
+                    backup_dir=str(backup_dir),
+                    historical_oor_dir=str(hist_dir),
+                    db_snapshot_dir=str(snap_dir),
+                )
+
+            synced_wb = load_workbook(source_path)
+            synced_ws = synced_wb["OOR"]
+            # Column N (14) should receive the derived ceil(21/4)=6 value.
+            self.assertEqual(synced_ws.cell(row=2, column=14).value, 6)
+            synced_wb.close()
 
 
 if __name__ == "__main__":
