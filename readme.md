@@ -30,6 +30,7 @@ CLI option for full runs:
 - --email-test-recipient <email>: overrides manifest recipients for safe test sends
 - --email-audiences production,order_entry,shipping: optional audience filter
 - --email-transport smtp|outlook: choose SMTP or installed Outlook desktop transport (default: outlook)
+- FMES_SEND_REPORT_EMAIL=true|false: optional default when --send-report-email is omitted
 
 ## Current Runtime Flow
 
@@ -108,6 +109,8 @@ Email routing model:
 - email attachments are intentionally limited to report_pack.xlsx and Open_Order_Report_Updated_*.xlsx
 - default recipients include sliles@monettmetals.com, BRaub@monettmetals.com, and lburkardt@monettmetals.com
 - send mode can use manifest recipients or a one-off test recipient override
+- packaged Scheduler.exe / SchedulerUpdateOnly.exe runs default to sending email when --send-report-email is omitted
+- set FMES_SEND_REPORT_EMAIL=0 to disable default send behavior for executable runs
 
 SMTP environment variables (required for send mode):
 

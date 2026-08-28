@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 import unittest
@@ -7,6 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from fmes import main as main_module
 from fmes.main import run
 
 
@@ -55,6 +57,33 @@ class MainReportingPackTests(unittest.TestCase):
         self.assertIsNotNone(result["email"])
         send_report_pack_email.assert_called_once()
         self.assertEqual(send_report_pack_email.call_args.kwargs["transport"], "outlook")
+
+    def test_resolve_send_report_email_defaults_true_for_frozen_exe(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            main_module.sys, "frozen", True, create=True
+        ):
+            self.assertTrue(main_module.resolve_send_report_email(False))
+
+    def test_resolve_send_report_email_defaults_false_for_non_frozen(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            main_module.sys, "frozen", False, create=True
+        ):
+            self.assertFalse(main_module.resolve_send_report_email(False))
+
+    def test_resolve_send_report_email_honors_env_override(self):
+        with patch.dict(
+            os.environ,
+            {"FMES_SEND_REPORT_EMAIL": "0"},
+            clear=True,
+        ), patch.object(main_module.sys, "frozen", True, create=True):
+            self.assertFalse(main_module.resolve_send_report_email(False))
+
+        with patch.dict(
+            os.environ,
+            {"FMES_SEND_REPORT_EMAIL": "yes"},
+            clear=True,
+        ), patch.object(main_module.sys, "frozen", False, create=True):
+            self.assertTrue(main_module.resolve_send_report_email(False))
 
 
 if __name__ == "__main__":

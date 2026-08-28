@@ -4,7 +4,14 @@ import argparse
 import logging
 import os
 
-from .main import DEFAULT_MOLD_OUTPUT, _pause_before_exit, run, setup_logging
+from .main import (
+    DEFAULT_MOLD_OUTPUT,
+    DEFAULT_REPORT_PACK_OUTPUT,
+    _pause_before_exit,
+    resolve_send_report_email,
+    run,
+    setup_logging,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -67,11 +74,23 @@ def main():
 
     exit_code = 0
     try:
+        send_report_email = resolve_send_report_email(args.send_report_email)
+
+        report_pack_dir = args.report_pack_dir
+        if isinstance(report_pack_dir, str) and report_pack_dir.strip().lower() == "default":
+            report_pack_dir = DEFAULT_REPORT_PACK_OUTPUT
+
+        email_test_recipient = args.email_test_recipient
+        if isinstance(email_test_recipient, str):
+            email_test_recipient = email_test_recipient.strip() or None
+        if not email_test_recipient:
+            email_test_recipient = os.getenv("FMES_EMAIL_TEST_RECIPIENT", "").strip() or None
+
         result = run(
             output_file=args.output_file,
-            report_pack_dir=args.report_pack_dir,
-            send_report_email=args.send_report_email,
-            email_test_recipient=args.email_test_recipient,
+            report_pack_dir=report_pack_dir,
+            send_report_email=send_report_email,
+            email_test_recipient=email_test_recipient,
             email_audiences=args.email_audiences,
             email_transport=args.email_transport,
         )

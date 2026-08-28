@@ -33,6 +33,37 @@ def _resolve_schedule_source():
     return os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
 
 
+def _parse_bool(raw_value: str | None, default: bool) -> bool:
+    """Parse bool-like string values with default fallback."""
+    if raw_value is None:
+        return default
+
+    normalized = str(raw_value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def resolve_send_report_email(send_report_email_flag: bool) -> bool:
+    """Resolve whether report-pack email should be sent for this run.
+
+    Priority order:
+    1) Explicit CLI flag --send-report-email
+    2) FMES_SEND_REPORT_EMAIL environment variable
+    3) Default True when running as frozen executable, otherwise False
+    """
+    if send_report_email_flag:
+        return True
+
+    env_default = os.getenv("FMES_SEND_REPORT_EMAIL")
+    if env_default is not None:
+        return _parse_bool(env_default, default=False)
+
+    return bool(getattr(sys, "frozen", False))
+
+
 def setup_logging():
     """Console shows plain readable messages; the monthly file keeps full detail."""
     console_handler = logging.StreamHandler()
@@ -206,6 +237,8 @@ def main():
 
     exit_code = 0
     try:
+        send_report_email = resolve_send_report_email(args.send_report_email)
+
         report_pack_dir = args.report_pack_dir
         if isinstance(report_pack_dir, str) and report_pack_dir.strip().lower() == "default":
             report_pack_dir = DEFAULT_REPORT_PACK_OUTPUT
@@ -219,7 +252,7 @@ def main():
         result = run(
             output_file=args.output_file,
             report_pack_dir=report_pack_dir,
-            send_report_email=args.send_report_email,
+            send_report_email=send_report_email,
             email_test_recipient=email_test_recipient,
             email_audiences=args.email_audiences,
             email_transport=args.email_transport,
