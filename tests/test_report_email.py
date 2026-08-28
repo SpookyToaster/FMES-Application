@@ -84,6 +84,7 @@ class ReportEmailTests(unittest.TestCase):
                     schedule_source="sql",
                     requested_audiences="production",
                     test_recipient="lburkardt@monettmetals.com",
+                    transport="smtp",
                 )
 
             self.assertEqual(result["recipient_count"], 1)
@@ -124,6 +125,94 @@ class ReportEmailTests(unittest.TestCase):
                         schedule_source="excel",
                         requested_audiences="production",
                     )
+
+    def test_send_report_pack_email_uses_outlook_transport(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            attachment = temp_path / "report.csv"
+            attachment.write_text("x\n1\n", encoding="utf-8")
+
+            manifest = {
+                "audiences": [
+                    {
+                        "audience": "production",
+                        "enabled": True,
+                        "recipients": ["prod@monettmetals.com"],
+                        "attachments": [str(attachment)],
+                    }
+                ]
+            }
+            manifest_path = temp_path / "distribution_manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with patch("fmes.report_email._send_via_outlook") as send_outlook:
+                result = send_report_pack_email(
+                    report_pack_result={"distribution_manifest": str(manifest_path)},
+                    schedule_source="excel",
+                    requested_audiences="production",
+                    test_recipient="lburkardt@monettmetals.com",
+                    transport="outlook",
+                )
+
+            self.assertEqual(result["transport"], "outlook")
+            self.assertEqual(result["recipient_count"], 1)
+            send_outlook.assert_called_once()
+
+    def test_send_report_pack_email_rejects_unknown_transport(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            attachment = temp_path / "report.csv"
+            attachment.write_text("x\n1\n", encoding="utf-8")
+
+            manifest = {
+                "audiences": [
+                    {
+                        "audience": "production",
+                        "enabled": True,
+                        "recipients": ["prod@monettmetals.com"],
+                        "attachments": [str(attachment)],
+                    }
+                ]
+            }
+            manifest_path = temp_path / "distribution_manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(RuntimeError):
+                send_report_pack_email(
+                    report_pack_result={"distribution_manifest": str(manifest_path)},
+                    schedule_source="excel",
+                    requested_audiences="production",
+                    transport="invalid",
+                )
+
+    def test_send_report_pack_email_defaults_to_outlook_transport(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            attachment = temp_path / "report.csv"
+            attachment.write_text("x\n1\n", encoding="utf-8")
+
+            manifest = {
+                "audiences": [
+                    {
+                        "audience": "production",
+                        "enabled": True,
+                        "recipients": ["prod@monettmetals.com"],
+                        "attachments": [str(attachment)],
+                    }
+                ]
+            }
+            manifest_path = temp_path / "distribution_manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with patch.dict(os.environ, {}, clear=True), patch("fmes.report_email._send_via_outlook") as send_outlook:
+                result = send_report_pack_email(
+                    report_pack_result={"distribution_manifest": str(manifest_path)},
+                    schedule_source="excel",
+                    test_recipient="lburkardt@monettmetals.com",
+                )
+
+            self.assertEqual(result["transport"], "outlook")
+            send_outlook.assert_called_once()
 
 
 if __name__ == "__main__":

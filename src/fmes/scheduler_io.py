@@ -238,10 +238,24 @@ def _normalize_sql_rows(raw_rows):
     frame["Molds Completed"] = molds_completed
     frame[Columns.COL_MOLDS_NEEDED] = (quantity_of_molds - molds_completed).clip(lower=0)
 
+    if Columns.COL_HOLD not in frame.columns and "On Hold" in frame.columns:
+        frame[Columns.COL_HOLD] = frame["On Hold"]
+
     if Columns.COL_HOLD not in frame.columns:
         frame[Columns.COL_HOLD] = "NO"
     else:
-        frame[Columns.COL_HOLD] = frame[Columns.COL_HOLD].fillna("NO")
+        frame[Columns.COL_HOLD] = (
+            frame[Columns.COL_HOLD]
+            .fillna("NO")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .replace({"Y": "YES", "N": "NO", "TRUE": "YES", "FALSE": "NO"})
+        )
+        frame[Columns.COL_HOLD] = frame[Columns.COL_HOLD].where(
+            frame[Columns.COL_HOLD].isin({"YES", "NO"}),
+            "NO",
+        )
 
     if Columns.COL_SCHEDULED not in frame.columns:
         frame[Columns.COL_SCHEDULED] = "NO"

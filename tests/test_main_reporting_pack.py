@@ -49,10 +49,12 @@ class MainReportingPackTests(unittest.TestCase):
                 send_report_email=True,
                 email_test_recipient="lburkardt@monettmetals.com",
                 email_audiences="production",
+                email_transport="outlook",
             )
 
         self.assertIsNotNone(result["email"])
         send_report_pack_email.assert_called_once()
+        self.assertEqual(send_report_pack_email.call_args.kwargs["transport"], "outlook")
 
 
 if __name__ == "__main__":

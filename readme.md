@@ -29,6 +29,7 @@ CLI option for full runs:
 - --send-report-email: sends report-pack files via SMTP after successful run
 - --email-test-recipient <email>: overrides manifest recipients for safe test sends
 - --email-audiences production,order_entry,shipping: optional audience filter
+- --email-transport smtp|outlook: choose SMTP or installed Outlook desktop transport (default: outlook)
 
 ## Current Runtime Flow
 
@@ -52,6 +53,7 @@ During SQL sync, [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) does all o
 - Validates required text fields (due date, customer, part, job)
 - Normalizes rows before writing to OOR
 - Writes OOR range F2:V* while preserving workbook metadata
+- Writes OOR Column A Hold values directly from SQL "On Hold" data (YES/NO)
 - Writes a SQL snapshot workbook for audit/comparison
 
 Important normalization rule now active:
@@ -95,11 +97,15 @@ Optional reporting pack output (when --report-pack-dir is provided):
 - job_shipping_outlook.csv
 - jobs_requiring_attention.csv
 - daily_capacity_summary.csv
+- report_pack.xlsx (formatted multi-sheet workbook)
+- Open_Order_Report_Updated_YYYYMMDD_HHMMSS.xlsx (copied from current OOR)
 - distribution_manifest.json
 
 Email routing model:
 
 - distribution_manifest.json stores audience entries with enabled, recipients, and attachments
+- email attachments are intentionally limited to report_pack.xlsx and Open_Order_Report_Updated_*.xlsx
+- default recipients include sliles@monettmetals.com, BRaub@monettmetals.com, and lburkardt@monettmetals.com
 - send mode can use manifest recipients or a one-off test recipient override
 
 SMTP environment variables (required for send mode):
@@ -110,6 +116,14 @@ SMTP environment variables (required for send mode):
 - FMES_SMTP_USERNAME (optional)
 - FMES_SMTP_PASSWORD (required when username is set)
 - FMES_SMTP_USE_STARTTLS (default true)
+
+Outlook desktop transport:
+
+- Use --email-transport outlook to send via signed-in Outlook desktop profile.
+- Outlook is the default send transport when no override is provided.
+- Requires Outlook desktop installed and configured on the machine.
+- Requires pywin32 in the Python environment.
+- Optional FMES_OUTLOOK_FROM can set SentOnBehalfOfName when needed.
 
 Supporting artifacts from SQL sync:
 
@@ -140,7 +154,7 @@ Run fast focused suite:
 
 Current baseline after latest changes:
 
-- 52 tests passing via unittest discovery
+- 63 tests passing via unittest discovery
 
 ## Build and Packaging
 
@@ -166,6 +180,12 @@ Test-send report pack to one address:
 
 ```powershell
 .venv\Scripts\python.exe run_scheduler.py --source sql --report-pack-dir default --send-report-email --email-test-recipient lburkardt@monettmetals.com --no-pause
+```
+
+Outlook desktop send example:
+
+```powershell
+.venv\Scripts\python.exe run_scheduler.py --source sql --report-pack-dir default --send-report-email --email-test-recipient lburkardt@monettmetals.com --email-transport outlook --no-pause
 ```
 
 ## Maintainer Notes

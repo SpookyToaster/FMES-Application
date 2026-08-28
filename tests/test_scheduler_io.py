@@ -77,6 +77,30 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["Hold"], "NO")
         self.assertEqual(frame.iloc[0]["Scheduled"], "NO")
 
+    def test_read_file_sql_maps_on_hold_to_hold(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "Quantity of Molds": 10,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+                "Molds Completed": 3,
+                "On Hold": "YES",
+            }
+        ]
+
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Hold"], "YES")
+
     def test_read_file_sql_derives_molds_when_quantity_of_molds_is_zero(self):
         sql_rows = [
             {
@@ -444,6 +468,7 @@ class SchedulerIOTests(unittest.TestCase):
                 "[Production Schedule Summary.xlsx]Mold Schedule'!$C$2:$C$1048576,1,FALSE)),"
                 '"YES","NO")',
             )
+            self.assertEqual(synced_ws.cell(row=2, column=1).value, "NO")
             self.assertEqual(synced_ws.cell(row=2, column=6).value, "2026-08-04")
             self.assertEqual(synced_ws.cell(row=2, column=7).value, "Customer A")
             self.assertEqual(synced_ws.cell(row=2, column=13).value, 10)
@@ -456,6 +481,57 @@ class SchedulerIOTests(unittest.TestCase):
             self.assertEqual(synced_ws.cell(row=2, column=21).value, 3)
             self.assertEqual(synced_ws.cell(row=2, column=22).value, 0)
             self.assertEqual(synced_ws.cell(row=3, column=6).value, "")
+            synced_wb.close()
+
+    def test_sync_open_order_report_with_sql_writes_hold_status_to_column_a(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_path = temp_path / "Open Order Report.xlsx"
+            backup_dir = temp_path / "Backups"
+            hist_dir = temp_path / "Historical OORs"
+            snap_dir = temp_path / "Historical DB Snapshots"
+
+            workbook = Workbook()
+            ws = workbook.active
+            ws.title = "OOR"
+            for idx in range(1, 23):
+                ws.cell(row=1, column=idx).value = f"H{idx}"
+            workbook.save(source_path)
+
+            sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Customer A",
+                    "Part Number": "P1",
+                    "Job Type": "JOB",
+                    "Job Number": "9001",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 10,
+                    "Quantity of Molds": 5,
+                    "Castings Per Mold": 2,
+                    "Quantity of Cores": 1,
+                    "Pour Weight": 100,
+                    "Total Pour WT": 500,
+                    "Total Value": 1000,
+                    "Heat No Assigned": "H1",
+                    "Castings Produced": 3,
+                    "Molds Completed": 0,
+                    "On Hold": "YES",
+                }
+            ]
+
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+                result = sync_open_order_report_with_sql(
+                    source_workbook_path=str(source_path),
+                    backup_dir=str(backup_dir),
+                    historical_oor_dir=str(hist_dir),
+                    db_snapshot_dir=str(snap_dir),
+                )
+
+            synced_wb = load_workbook(source_path)
+            synced_ws = synced_wb["OOR"]
+            self.assertEqual(synced_ws.cell(row=2, column=1).value, "YES")
             synced_wb.close()
 
             snapshot_wb = load_workbook(result["db_snapshot_path"])

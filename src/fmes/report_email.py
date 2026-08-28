@@ -24,6 +24,9 @@ class SmtpSettings:
     use_starttls: bool
 
 
+SUPPORTED_TRANSPORTS = {"smtp", "outlook"}
+
+
 def _parse_bool(raw_value: str | None, default: bool) -> bool:
     """Parse bool-like environment values with a default fallback."""
     if raw_value is None:
@@ -71,6 +74,17 @@ def load_smtp_settings_from_env() -> SmtpSettings:
         password=password,
         use_starttls=use_starttls,
     )
+
+
+def _normalize_transport(transport: str | None) -> str:
+    """Resolve email transport from explicit arg or environment."""
+    resolved = (transport or os.getenv("FMES_EMAIL_TRANSPORT", "outlook")).strip().lower()
+    if resolved not in SUPPORTED_TRANSPORTS:
+        raise RuntimeError(
+            "Unsupported email transport: "
+            f"{resolved}. Supported values: {', '.join(sorted(SUPPORTED_TRANSPORTS))}."
+        )
+    return resolved
 
 
 def _load_manifest(path: str | Path) -> dict:
@@ -132,27 +146,16 @@ def _resolve_attachments_and_recipients(manifest: dict, audiences: list[str]) ->
 def _build_email_message(
     from_address: str,
     recipients: list[str],
-    schedule_source: str,
-    selected_audiences: list[str],
+    subject: str,
+    body: str,
     attachment_paths: list[str],
 ) -> EmailMessage:
     """Build an email message with report-pack attachments."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    subject = f"FMES Report Pack | {timestamp}"
-
-    body_lines = [
-        "FMES report pack generated.",
-        "",
-        f"Source: {schedule_source.upper()}",
-        f"Audiences: {', '.join(selected_audiences) if selected_audiences else 'none'}",
-        f"Attachment count: {len(attachment_paths)}",
-    ]
-
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = from_address
     message["To"] = ", ".join(recipients)
-    message.set_content("\n".join(body_lines))
+    message.set_content(body)
 
     for attachment_path in attachment_paths:
         file_path = Path(attachment_path)
@@ -176,11 +179,89 @@ def _build_email_message(
     return message
 
 
+def _build_email_subject_and_body(
+    schedule_source: str,
+    selected_audiences: list[str],
+    attachment_paths: list[str],
+) -> tuple[str, str]:
+    """Build standard report-pack email subject/body text."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    subject = f"FMES Report Pack | {timestamp}"
+    body_lines = [
+        "FMES report pack generated.",
+        "",
+        f"Source: {schedule_source.upper()}",
+        f"Audiences: {', '.join(selected_audiences) if selected_audiences else 'none'}",
+        f"Attachment count: {len(attachment_paths)}",
+    ]
+    return subject, "\n".join(body_lines)
+
+
+def _send_via_smtp(
+    smtp_settings: SmtpSettings,
+    recipients: list[str],
+    subject: str,
+    body: str,
+    attachment_paths: list[str],
+) -> None:
+    """Send report-pack email via SMTP."""
+    message = _build_email_message(
+        from_address=smtp_settings.from_address,
+        recipients=recipients,
+        subject=subject,
+        body=body,
+        attachment_paths=attachment_paths,
+    )
+
+    with smtplib.SMTP(smtp_settings.host, smtp_settings.port) as smtp:
+        smtp.ehlo()
+        if smtp_settings.use_starttls:
+            smtp.starttls()
+            smtp.ehlo()
+        if smtp_settings.username:
+            smtp.login(smtp_settings.username, smtp_settings.password)
+        smtp.send_message(message)
+
+
+def _send_via_outlook(
+    recipients: list[str],
+    subject: str,
+    body: str,
+    attachment_paths: list[str],
+) -> None:
+    """Send report-pack email through installed Outlook desktop profile."""
+    try:
+        import win32com.client  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError(
+            "Outlook desktop email transport requires pywin32. "
+            "Install with: pip install pywin32"
+        ) from exc
+
+    outlook = win32com.client.Dispatch("Outlook.Application")
+    message = outlook.CreateItem(0)
+    message.Subject = subject
+    message.Body = body
+    message.To = "; ".join(recipients)
+
+    send_as = os.getenv("FMES_OUTLOOK_FROM", "").strip()
+    if send_as:
+        message.SentOnBehalfOfName = send_as
+
+    for attachment_path in attachment_paths:
+        file_path = Path(attachment_path)
+        if file_path.exists():
+            message.Attachments.Add(str(file_path))
+
+    message.Send()
+
+
 def send_report_pack_email(
     report_pack_result: dict,
     schedule_source: str,
     requested_audiences: str | None = None,
     test_recipient: str | None = None,
+    transport: str | None = None,
 ) -> dict:
     """Send report-pack artifacts by email via SMTP.
 
@@ -202,23 +283,29 @@ def send_report_pack_email(
     if not attachment_paths:
         raise RuntimeError("No report-pack attachments resolved for the selected audiences.")
 
-    smtp_settings = load_smtp_settings_from_env()
-    message = _build_email_message(
-        from_address=smtp_settings.from_address,
-        recipients=recipients,
+    selected_transport = _normalize_transport(transport)
+    subject, body = _build_email_subject_and_body(
         schedule_source=schedule_source,
         selected_audiences=selected_audiences,
         attachment_paths=attachment_paths,
     )
 
-    with smtplib.SMTP(smtp_settings.host, smtp_settings.port) as smtp:
-        smtp.ehlo()
-        if smtp_settings.use_starttls:
-            smtp.starttls()
-            smtp.ehlo()
-        if smtp_settings.username:
-            smtp.login(smtp_settings.username, smtp_settings.password)
-        smtp.send_message(message)
+    if selected_transport == "smtp":
+        smtp_settings = load_smtp_settings_from_env()
+        _send_via_smtp(
+            smtp_settings=smtp_settings,
+            recipients=recipients,
+            subject=subject,
+            body=body,
+            attachment_paths=attachment_paths,
+        )
+    else:
+        _send_via_outlook(
+            recipients=recipients,
+            subject=subject,
+            body=body,
+            attachment_paths=attachment_paths,
+        )
 
     return {
         "recipient_count": len(recipients),
@@ -226,4 +313,5 @@ def send_report_pack_email(
         "audiences": selected_audiences,
         "attachment_count": len(attachment_paths),
         "attachments": attachment_paths,
+        "transport": selected_transport,
     }

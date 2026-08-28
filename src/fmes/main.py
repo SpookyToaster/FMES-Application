@@ -80,7 +80,7 @@ def parse_args():
     parser.add_argument(
         "--send-report-email",
         action="store_true",
-        help="Send report-pack artifacts by SMTP email after run completion.",
+        help="Send report-pack artifacts by configured email transport after run completion.",
     )
     parser.add_argument(
         "--email-test-recipient",
@@ -91,6 +91,12 @@ def parse_args():
         "--email-audiences",
         default=None,
         help="Comma-separated audiences to send (defaults to all in manifest).",
+    )
+    parser.add_argument(
+        "--email-transport",
+        choices=["smtp", "outlook"],
+        default=None,
+        help="Email transport override (smtp or outlook).",
     )
     parser.add_argument(
         "--no-pause",
@@ -106,6 +112,7 @@ def run(
     send_report_email=False,
     email_test_recipient=None,
     email_audiences=None,
+    email_transport=None,
 ):
     """
     Execute full scheduler run and export one combined workbook.
@@ -161,6 +168,7 @@ def run(
             schedule_source=schedule_source,
             requested_audiences=email_audiences,
             test_recipient=email_test_recipient,
+            transport=email_transport,
         )
         logger.info(
             "      Email sent to %s recipient(s): %s",
@@ -214,6 +222,7 @@ def main():
             send_report_email=args.send_report_email,
             email_test_recipient=email_test_recipient,
             email_audiences=args.email_audiences,
+            email_transport=args.email_transport,
         )
 
         logger.info("=" * 60)

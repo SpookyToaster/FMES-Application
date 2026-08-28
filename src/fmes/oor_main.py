@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument(
         "--send-report-email",
         action="store_true",
-        help="Send report-pack artifacts by SMTP email after run completion.",
+        help="Send report-pack artifacts by configured email transport after run completion.",
     )
     parser.add_argument(
         "--email-test-recipient",
@@ -42,6 +42,12 @@ def parse_args():
         "--email-audiences",
         default=None,
         help="Comma-separated audiences to send (defaults to all in manifest).",
+    )
+    parser.add_argument(
+        "--email-transport",
+        choices=["smtp", "outlook"],
+        default=None,
+        help="Email transport override (smtp or outlook).",
     )
     parser.add_argument(
         "--no-pause",
@@ -67,6 +73,7 @@ def main():
             send_report_email=args.send_report_email,
             email_test_recipient=args.email_test_recipient,
             email_audiences=args.email_audiences,
+            email_transport=args.email_transport,
         )
 
         logger.info("=" * 60)
