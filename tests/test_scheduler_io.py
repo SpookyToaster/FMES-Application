@@ -101,6 +101,54 @@ class SchedulerIOTests(unittest.TestCase):
 
         self.assertEqual(frame.iloc[0]["Hold"], "YES")
 
+    def test_read_file_sql_maps_numeric_on_hold_values(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "Quantity of Molds": 10,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+                "Molds Completed": 3,
+                "On Hold": "1",
+            }
+        ]
+
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Hold"], "YES")
+
+    def test_read_file_sql_maps_onhold_column_without_space(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9001",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "Quantity of Molds": 10,
+                "Castings Per Mold": 2,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+                "Molds Completed": 3,
+                "OnHold": "1",
+            }
+        ]
+
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Hold"], "YES")
+
     def test_read_file_sql_derives_molds_when_quantity_of_molds_is_zero(self):
         sql_rows = [
             {
@@ -639,6 +687,129 @@ class SchedulerIOTests(unittest.TestCase):
                     )
 
             self.assertIn("workbook is locked", str(context.exception).lower())
+
+    def test_sync_open_order_report_with_sql_refreshes_shipping_table_sheet(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_path = temp_path / "Open Order Report.xlsx"
+            shipping_source_path = temp_path / "Shipping Table.xlsx"
+            backup_dir = temp_path / "Backups"
+            hist_dir = temp_path / "Historical OORs"
+            snap_dir = temp_path / "Historical DB Snapshots"
+
+            target_wb = Workbook()
+            target_oor = target_wb.active
+            target_oor.title = "OOR"
+            target_oor.cell(row=1, column=1).value = "Hold"
+            shipping_target = target_wb.create_sheet("Shipping Table")
+            shipping_target.cell(row=1, column=1).value = "old"
+            target_wb.save(source_path)
+
+            source_wb = Workbook()
+            source_ws = source_wb.active
+            source_ws.title = "Shipping Table"
+            source_ws.cell(row=1, column=1).value = "Carrier"
+            source_ws.cell(row=1, column=2).value = "Days"
+            source_ws.cell(row=2, column=1).value = "UPS"
+            source_ws.cell(row=2, column=2).value = 3
+            source_wb.save(shipping_source_path)
+
+            sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Customer A",
+                    "Part Number": "P1",
+                    "Job Type": "JOB",
+                    "Job Number": "9001",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 10,
+                    "Quantity of Molds": 5,
+                    "Castings Per Mold": 2,
+                    "Quantity of Cores": 1,
+                    "Pour Weight": 100,
+                    "Total Pour WT": 500,
+                    "Total Value": 1000,
+                    "Heat No Assigned": "H1",
+                    "Castings Produced": 3,
+                    "Molds Completed": 0,
+                    "On Hold": "NO",
+                }
+            ]
+
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+                result = sync_open_order_report_with_sql(
+                    source_workbook_path=str(source_path),
+                    backup_dir=str(backup_dir),
+                    historical_oor_dir=str(hist_dir),
+                    db_snapshot_dir=str(snap_dir),
+                    shipping_table_workbook_path=str(shipping_source_path),
+                    shipping_table_sheet_name="Shipping Table",
+                    oor_shipping_table_sheet_name="Shipping Table",
+                )
+
+            synced_wb = load_workbook(source_path)
+            synced_shipping = synced_wb["Shipping Table"]
+            self.assertEqual(synced_shipping.cell(row=1, column=1).value, "Carrier")
+            self.assertEqual(synced_shipping.cell(row=1, column=2).value, "Days")
+            self.assertEqual(synced_shipping.cell(row=2, column=1).value, "UPS")
+            self.assertEqual(synced_shipping.cell(row=2, column=2).value, 3)
+            synced_wb.close()
+
+            self.assertTrue(result["shipping_table_sync"]["updated"])
+            self.assertEqual(result["shipping_table_sync"]["row_count"], 2)
+
+    def test_sync_open_order_report_with_sql_skips_shipping_table_when_source_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_path = temp_path / "Open Order Report.xlsx"
+            backup_dir = temp_path / "Backups"
+            hist_dir = temp_path / "Historical OORs"
+            snap_dir = temp_path / "Historical DB Snapshots"
+
+            workbook = Workbook()
+            ws = workbook.active
+            ws.title = "OOR"
+            workbook.save(source_path)
+
+            missing_shipping_source = temp_path / "Shipping Table.xlsx"
+
+            sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Customer A",
+                    "Part Number": "P1",
+                    "Job Type": "JOB",
+                    "Job Number": "9001",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 10,
+                    "Quantity of Molds": 5,
+                    "Castings Per Mold": 2,
+                    "Quantity of Cores": 1,
+                    "Pour Weight": 100,
+                    "Total Pour WT": 500,
+                    "Total Value": 1000,
+                    "Heat No Assigned": "H1",
+                    "Castings Produced": 3,
+                    "Molds Completed": 0,
+                    "On Hold": "NO",
+                }
+            ]
+
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+                result = sync_open_order_report_with_sql(
+                    source_workbook_path=str(source_path),
+                    backup_dir=str(backup_dir),
+                    historical_oor_dir=str(hist_dir),
+                    db_snapshot_dir=str(snap_dir),
+                    shipping_table_workbook_path=str(missing_shipping_source),
+                    shipping_table_sheet_name="Shipping Table",
+                    oor_shipping_table_sheet_name="Shipping Table",
+                )
+
+            self.assertFalse(result["shipping_table_sync"]["updated"])
+            self.assertEqual(result["shipping_table_sync"]["reason"], "source_missing")
 
 
 if __name__ == "__main__":

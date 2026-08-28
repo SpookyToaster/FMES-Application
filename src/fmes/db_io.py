@@ -67,8 +67,8 @@ MAIN_DASHBOARD_LIVE_SQL = """
             NULLIF(LTRIM(RTRIM(jm.USERDEFINED7)), '') AS CastingType,
             NULLIF(LTRIM(RTRIM(CONVERT(varchar(100), jm.HEATNUMBER))), '') AS MainHeatNoAssigned,
             CASE
-                WHEN NULLIF(LTRIM(RTRIM(jm.JOBONHOLD)), '') = 'þ' THEN 'YES'
-                WHEN NULLIF(LTRIM(RTRIM(jm.JOBONHOLD)), '') = 'o' THEN 'NO'
+                WHEN NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.JOBONHOLD))), '') IN ('þ', '1', 'Y', 'YES', 'TRUE', 'T') THEN 'YES'
+                WHEN NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.JOBONHOLD))), '') IN ('o', '0', 'N', 'NO', 'FALSE', 'F') THEN 'NO'
                 ELSE 'NO'
             END AS OnHold,
             COALESCE(jm.QUANTITYREQUIRED, 0) AS QuantityOfCastings,

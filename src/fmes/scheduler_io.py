@@ -7,6 +7,7 @@ exported from the ERP system and placed in the shared OneDrive folder.
 
 import math
 import logging
+import os
 from pathlib import Path
 import shutil
 
@@ -23,6 +24,7 @@ from .scheduler_validation import validate_sql_rows
 from .workbook_sync import (
     export_worksheet_values,
     save_sql_snapshot,
+    sync_worksheet_values_from_workbook,
     write_sql_data_to_oor,
 )
 
@@ -37,6 +39,9 @@ DEFAULT_BACKUP_DIR = str(Paths.BACKUP_DIR)
 DEFAULT_HISTORICAL_OOR_DIR = str(Paths.HISTORICAL_OOR_DIR)
 
 DEFAULT_DB_SNAPSHOT_DIR = str(Paths.DB_SNAPSHOT_DIR)
+DEFAULT_SHIPPING_TABLE_WORKBOOK_PATH = str(Paths.SHIPPING_TABLE_WORKBOOK)
+DEFAULT_SHIPPING_TABLE_SHEET_NAME = ""
+DEFAULT_OOR_SHIPPING_TABLE_SHEET_NAME = "Shipped"
 
 SQL_MAIN_EXPORT_COLUMNS = [
     "Due Date",
@@ -95,6 +100,9 @@ def sync_open_order_report_with_sql(
     backup_dir=DEFAULT_BACKUP_DIR,
     historical_oor_dir=DEFAULT_HISTORICAL_OOR_DIR,
     db_snapshot_dir=DEFAULT_DB_SNAPSHOT_DIR,
+    shipping_table_workbook_path=DEFAULT_SHIPPING_TABLE_WORKBOOK_PATH,
+    shipping_table_sheet_name=DEFAULT_SHIPPING_TABLE_SHEET_NAME,
+    oor_shipping_table_sheet_name=DEFAULT_OOR_SHIPPING_TABLE_SHEET_NAME,
 ):
     """
     Sync Open Order Report workbook artifacts with current SQL main-dashboard data.
@@ -134,6 +142,64 @@ def sync_open_order_report_with_sql(
             "If you only need schedule/export from current workbook values, run OOR-only mode."
         ) from exc
 
+    resolved_shipping_source_sheet = str(
+        shipping_table_sheet_name or os.getenv("FMES_SHIPPING_TABLE_SOURCE_SHEET", "")
+    ).strip() or None
+    resolved_shipping_target_sheet = str(
+        oor_shipping_table_sheet_name or os.getenv(
+            "FMES_OOR_SHIPPING_TABLE_SHEET",
+            DEFAULT_OOR_SHIPPING_TABLE_SHEET_NAME,
+        )
+    ).strip() or None
+
+    shipping_sync = {
+        "updated": False,
+        "source_workbook": str(shipping_table_workbook_path),
+        "source_sheet": resolved_shipping_source_sheet or "<active sheet>",
+        "target_sheet": resolved_shipping_target_sheet or "",
+        "row_count": 0,
+        "column_count": 0,
+        "reason": "skipped",
+    }
+
+    shipping_source_path = Path(shipping_table_workbook_path)
+    if shipping_source_path.exists():
+        try:
+            shipping_result = sync_worksheet_values_from_workbook(
+                target_workbook_path=source_path,
+                target_sheet_name=resolved_shipping_target_sheet,
+                source_workbook_path=shipping_source_path,
+                source_sheet_name=resolved_shipping_source_sheet,
+            )
+            shipping_sync.update(
+                {
+                    "updated": True,
+                    "row_count": int(shipping_result.get("row_count", 0)),
+                    "column_count": int(shipping_result.get("column_count", 0)),
+                    "source_sheet": str(
+                        shipping_result.get("source_sheet", shipping_sync["source_sheet"])
+                    ),
+                    "target_sheet": str(
+                        shipping_result.get("target_sheet", shipping_sync["target_sheet"])
+                    ),
+                    "reason": "updated",
+                }
+            )
+            logger.info(
+                "      Shipping Table refreshed from %s (%s rows).",
+                shipping_source_path,
+                shipping_sync["row_count"],
+            )
+        except RuntimeError as exc:
+            shipping_sync["reason"] = "sheet_sync_failed"
+            logger.warning("      Shipping Table refresh skipped: %s", exc)
+    else:
+        shipping_sync["reason"] = "source_missing"
+        logger.warning(
+            "      Shipping Table source workbook not found at %s; skipping refresh.",
+            shipping_source_path,
+        )
+
     sql_rows = get_main_dashboard_scheduler_rows()
     sql_rows = _exclude_rows_by_customer_name(sql_rows)
     sql_rows = validate_sql_rows(sql_rows)
@@ -151,6 +217,7 @@ def sync_open_order_report_with_sql(
         "historical_oor_path": str(historical_oor_path),
         "db_snapshot_path": str(db_snapshot_path),
         "row_count": len(normalized_rows),
+        "shipping_table_sync": shipping_sync,
     }
 
 
@@ -238,8 +305,11 @@ def _normalize_sql_rows(raw_rows):
     frame["Molds Completed"] = molds_completed
     frame[Columns.COL_MOLDS_NEEDED] = (quantity_of_molds - molds_completed).clip(lower=0)
 
-    if Columns.COL_HOLD not in frame.columns and "On Hold" in frame.columns:
-        frame[Columns.COL_HOLD] = frame["On Hold"]
+    if Columns.COL_HOLD not in frame.columns:
+        if "On Hold" in frame.columns:
+            frame[Columns.COL_HOLD] = frame["On Hold"]
+        elif "OnHold" in frame.columns:
+            frame[Columns.COL_HOLD] = frame["OnHold"]
 
     if Columns.COL_HOLD not in frame.columns:
         frame[Columns.COL_HOLD] = "NO"
@@ -250,7 +320,7 @@ def _normalize_sql_rows(raw_rows):
             .astype(str)
             .str.strip()
             .str.upper()
-            .replace({"Y": "YES", "N": "NO", "TRUE": "YES", "FALSE": "NO"})
+            .replace({"Y": "YES", "N": "NO", "TRUE": "YES", "FALSE": "NO", "1": "YES", "0": "NO"})
         )
         frame[Columns.COL_HOLD] = frame[Columns.COL_HOLD].where(
             frame[Columns.COL_HOLD].isin({"YES", "NO"}),

@@ -54,6 +54,7 @@ During SQL sync, [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) does all o
 - Normalizes rows before writing to OOR
 - Writes OOR range F2:V* while preserving workbook metadata
 - Writes OOR Column A Hold values directly from SQL "On Hold" data (YES/NO)
+- Refreshes OOR Shipping Table worksheet from Shipping Table.xlsx when available
 - Writes a SQL snapshot workbook for audit/comparison
 
 Important normalization rule now active:
@@ -130,6 +131,14 @@ Supporting artifacts from SQL sync:
 - Backups of Open Order Report.xlsx
 - Historical OOR snapshots
 - Historical DB snapshot workbooks
+
+Shipping Table sync source path:
+
+- Defaults to Quality/Schedule/Shipping Table.xlsx
+- Optional override with environment variable FMES_SHIPPING_TABLE_WORKBOOK
+- Source sheet defaults to the source workbook active sheet (first tab)
+- OOR target sheet defaults to Shipped
+- Optional overrides: FMES_SHIPPING_TABLE_SOURCE_SHEET and FMES_OOR_SHIPPING_TABLE_SHEET
 
 ## Logging
 

@@ -22,12 +22,22 @@ def _resolve_schedule_root():
     return Path.home() / "OneDrive - MonettMetalsUS1" / "Quality" / "Schedule"
 
 
+def _resolve_shipping_table_workbook():
+    """Return source workbook path for Shipping Table sync."""
+    env_path = os.getenv("FMES_SHIPPING_TABLE_WORKBOOK", "").strip()
+    if env_path:
+        return Path(env_path)
+
+    return SCHEDULE_ROOT / "Shipping Table.xlsx"
+
+
 SCHEDULE_ROOT = _resolve_schedule_root()
 
 
 class Paths:
     """Shared file locations derived from SCHEDULE_ROOT."""
     OPEN_ORDER_REPORT = SCHEDULE_ROOT / "Open Order Report.xlsx"
+    SHIPPING_TABLE_WORKBOOK = _resolve_shipping_table_workbook()
     BACKUP_DIR = SCHEDULE_ROOT / "Backups"
     HISTORICAL_OOR_DIR = SCHEDULE_ROOT / "Historical OORs"
     DB_SNAPSHOT_DIR = SCHEDULE_ROOT / "Historical DB Snapshots"

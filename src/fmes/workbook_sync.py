@@ -315,6 +315,152 @@ def export_worksheet_values(source_workbook_path, sheet_name, output_path):
         source_wb.close()
 
 
+def _is_blank_value(value):
+    """Return True when a worksheet value is effectively empty."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    if isinstance(value, float) and pd.isna(value):
+        return True
+    return False
+
+
+def _trim_worksheet_values(rows):
+    """Trim trailing blank rows/columns from a 2D worksheet value grid."""
+    if not rows:
+        return []
+
+    max_row_index = 0
+    max_col_index = 0
+
+    for row_idx, row_values in enumerate(rows, start=1):
+        row_has_value = False
+        for col_idx, value in enumerate(row_values, start=1):
+            if _is_blank_value(value):
+                continue
+            row_has_value = True
+            if col_idx > max_col_index:
+                max_col_index = col_idx
+        if row_has_value:
+            max_row_index = row_idx
+
+    if max_row_index == 0 or max_col_index == 0:
+        return []
+
+    return [list(row[:max_col_index]) for row in rows[:max_row_index]]
+
+
+def sync_worksheet_values_from_workbook(
+    target_workbook_path,
+    target_sheet_name,
+    source_workbook_path,
+    source_sheet_name=None,
+):
+    """Replace target worksheet values from source worksheet while preserving workbook metadata."""
+    if not str(target_sheet_name or "").strip():
+        raise RuntimeError("Target worksheet name is required for worksheet sync.")
+
+    resolved_target_sheet_name = str(target_sheet_name).strip()
+
+    source_wb = load_workbook(source_workbook_path, data_only=False)
+    try:
+        resolved_source_sheet_name = source_sheet_name
+        if resolved_source_sheet_name:
+            resolved_source_sheet_name = str(resolved_source_sheet_name).strip()
+
+        if not resolved_source_sheet_name:
+            source_ws = source_wb.active
+            resolved_source_sheet_name = source_ws.title
+        elif resolved_source_sheet_name not in source_wb.sheetnames:
+            raise RuntimeError(
+                f"Source worksheet '{resolved_source_sheet_name}' was not found in {source_workbook_path}."
+            )
+        else:
+            source_ws = source_wb[resolved_source_sheet_name]
+
+        source_rows = [
+            list(row)
+            for row in source_ws.iter_rows(
+                min_row=1,
+                max_row=source_ws.max_row,
+                min_col=1,
+                max_col=source_ws.max_column,
+                values_only=True,
+            )
+        ]
+    finally:
+        source_wb.close()
+
+    trimmed_rows = _trim_worksheet_values(source_rows)
+
+    with zipfile.ZipFile(target_workbook_path, "r") as target_zip:
+        target_sheet_archive_path = _resolve_sheet_archive_path(target_zip, resolved_target_sheet_name)
+        calc_chain_paths = _resolve_calc_chain_paths(target_zip)
+
+        sheet_root = ET.fromstring(target_zip.read(target_sheet_archive_path))
+        sheet_data = sheet_root.find(f"{{{XML_NS}}}sheetData")
+        if sheet_data is None:
+            raise RuntimeError(f"Worksheet '{resolved_target_sheet_name}' does not contain sheet data.")
+
+        for row_element in list(sheet_data.findall(f"{{{XML_NS}}}row")):
+            sheet_data.remove(row_element)
+
+        for row_idx, row_values in enumerate(trimmed_rows, start=1):
+            row_element = _find_or_create_row(sheet_data, row_idx)
+            for col_idx, value in enumerate(row_values, start=1):
+                if _is_blank_value(value):
+                    continue
+
+                cell = _find_or_create_cell(row_element, row_idx, col_idx)
+                if isinstance(value, str) and value.startswith("="):
+                    _set_cell_formula(cell, value)
+                elif isinstance(value, (int, float, Decimal, bool)):
+                    _set_cell_number(cell, value)
+                else:
+                    _set_cell_plain_text(cell, to_plain_text(value))
+
+        updated_sheet_xml = ET.tostring(
+            sheet_root,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+        updated_sheet_xml = restore_ignorable_namespace_declarations(updated_sheet_xml)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
+            temp_path = temp_file.name
+
+        try:
+            with zipfile.ZipFile(temp_path, "w") as output_zip:
+                for zip_info in target_zip.infolist():
+                    if zip_info.filename in calc_chain_paths:
+                        continue
+
+                    if zip_info.filename == target_sheet_archive_path:
+                        output_zip.writestr(zip_info, updated_sheet_xml)
+                    elif zip_info.filename == "xl/_rels/workbook.xml.rels":
+                        updated_rels_xml = _remove_calc_chain_relationships(
+                            target_zip.read(zip_info.filename)
+                        )
+                        output_zip.writestr(zip_info, updated_rels_xml)
+                    else:
+                        output_zip.writestr(zip_info, target_zip.read(zip_info.filename))
+
+            shutil.move(temp_path, target_workbook_path)
+        finally:
+            if Path(temp_path).exists():
+                Path(temp_path).unlink(missing_ok=True)
+
+    row_count = len(trimmed_rows)
+    column_count = max((len(row) for row in trimmed_rows), default=0)
+    return {
+        "row_count": row_count,
+        "column_count": column_count,
+        "source_sheet": resolved_source_sheet_name,
+        "target_sheet": resolved_target_sheet_name,
+    }
+
+
 def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_columns, sheet_name="OOR"):
     """Overwrite OOR F:V values by editing sheet XML directly to preserve workbook metadata."""
     start_row = 2
