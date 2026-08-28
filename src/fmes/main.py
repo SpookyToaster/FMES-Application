@@ -205,6 +205,8 @@ def main():
         email_test_recipient = args.email_test_recipient
         if isinstance(email_test_recipient, str):
             email_test_recipient = email_test_recipient.strip() or None
+        if not email_test_recipient:
+            email_test_recipient = os.getenv("FMES_EMAIL_TEST_RECIPIENT", "").strip() or None
 
         result = run(
             output_file=args.output_file,

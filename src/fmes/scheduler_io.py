@@ -125,7 +125,14 @@ def sync_open_order_report_with_sql(
         historical_oor_dir,
         f"OOR-{timestamp.strftime('%Y-%m-%d')}",
     )
-    export_worksheet_values(source_path, "OOR", historical_oor_path)
+    try:
+        export_worksheet_values(source_path, "OOR", historical_oor_path)
+    except PermissionError as exc:
+        raise RuntimeError(
+            "Open Order Report workbook is locked by another process. "
+            "Close the workbook (or disable sharing lock), then rerun. "
+            "If you only need schedule/export from current workbook values, run OOR-only mode."
+        ) from exc
 
     sql_rows = get_main_dashboard_scheduler_rows()
     sql_rows = _exclude_rows_by_customer_name(sql_rows)

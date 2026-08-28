@@ -515,6 +515,55 @@ class SchedulerIOTests(unittest.TestCase):
             self.assertEqual(synced_ws.cell(row=2, column=14).value, 6)
             synced_wb.close()
 
+    def test_sync_open_order_report_with_sql_reports_locked_workbook(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_path = temp_path / "Open Order Report.xlsx"
+            backup_dir = temp_path / "Backups"
+            hist_dir = temp_path / "Historical OORs"
+            snap_dir = temp_path / "Historical DB Snapshots"
+
+            workbook = Workbook()
+            ws = workbook.active
+            ws.title = "OOR"
+            workbook.save(source_path)
+
+            sql_rows = [
+                {
+                    "Due Date": "2026-08-04",
+                    "Customer Name": "Customer A",
+                    "Part Number": "P1",
+                    "Job Type": "JOB",
+                    "Job Number": "9001",
+                    "Alloy": "A",
+                    "Casting Type": "L",
+                    "QTY Ordered": 10,
+                    "Quantity of Molds": 5,
+                    "Castings Per Mold": 2,
+                    "Quantity of Cores": 1,
+                    "Pour Weight": 100,
+                    "Total Pour WT": 500,
+                    "Total Value": 1000,
+                    "Heat No Assigned": "H1",
+                    "Castings Produced": 3,
+                    "Molds Completed": 0,
+                }
+            ]
+
+            with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows), patch(
+                "fmes.scheduler_io.export_worksheet_values",
+                side_effect=PermissionError("locked"),
+            ):
+                with self.assertRaises(RuntimeError) as context:
+                    sync_open_order_report_with_sql(
+                        source_workbook_path=str(source_path),
+                        backup_dir=str(backup_dir),
+                        historical_oor_dir=str(hist_dir),
+                        db_snapshot_dir=str(snap_dir),
+                    )
+
+            self.assertIn("workbook is locked", str(context.exception).lower())
+
 
 if __name__ == "__main__":
     unittest.main()
