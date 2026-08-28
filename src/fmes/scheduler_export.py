@@ -100,13 +100,6 @@ def _apply_fill_to_row(ws, row_num, column_count, fill):
         ws.cell(row_num, col_num).fill = fill
 
 
-def _insert_day_break_row(ws, row_num, column_count, fill=None, height=8):
-    """Insert a blank visual spacer row between schedule days."""
-    ws.row_dimensions[row_num].height = height
-    if fill is not None:
-        _apply_fill_to_row(ws, row_num, column_count, fill)
-
-
 REPORT_TITLE_FILL = PatternFill(fill_type="solid", start_color="1F4E78", end_color="1F4E78")
 REPORT_SUBTITLE_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_color="D9E2F3")
 REPORT_HEADER_FILL = PatternFill(fill_type="solid", start_color="D9E2F3", end_color="D9E2F3")
@@ -160,12 +153,6 @@ def _apply_schedule_total_row(ws, row_num, columns):
     for col_num in columns:
         ws.cell(row_num, col_num).fill = REPORT_TOTAL_FILL
         ws.cell(row_num, col_num).font = Font(bold=True)
-
-
-def _apply_schedule_data_row(ws, row_num, column_count):
-    """Apply a consistent border/fill baseline to schedule data rows."""
-    for col_num in range(1, column_count + 1):
-        ws.cell(row_num, col_num).fill = REPORT_SEPARATOR_FILL
 
 
 def _build_mold_capacity_rows(export_blocks):

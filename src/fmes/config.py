@@ -34,6 +34,7 @@ class Paths:
     ALLOY_COMPATIBILITY_CSV = SCHEDULE_ROOT / "compatibleAlloys" / "alloy_compatibility.csv"
     MISSING_JOB_ID_LOG_DIR = SCHEDULE_ROOT
     OUTPUT_DIR = SCHEDULE_ROOT / "Output"
+    REPORT_PACK_DIR = OUTPUT_DIR / "Report Pack"
     MOLD_SCHEDULE_OUTPUT = OUTPUT_DIR / "Mold Schedule.xlsx"
     HEAT_SUMMARY_OUTPUT = OUTPUT_DIR / "Heat Summary.xlsx"
     COMBINED_SCHEDULE_OUTPUT = OUTPUT_DIR / "Production Schedule Summary.xlsx"

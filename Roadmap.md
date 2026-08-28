@@ -1,6 +1,6 @@
 # FMES Roadmap
 
-**Last Updated:** August 12, 2026
+**Last Updated:** August 28, 2026
 
 ## Vision
 
@@ -165,12 +165,13 @@ LastModified
 
 ## Phase 3 - Production Visibility
 
-### Status: Not Started
+### Status: In Progress
 
 ### Daily Production Schedule Integration
 
 - Push mold schedule into daily production scheduling process
 - Improve production planning visibility
+- Completed foundation: production-visibility summaries now generated from runtime outputs (job status rollups, attention list, daily capacity summary) for downstream reporting
 
 ### Melt WIP Schedule
 
@@ -198,13 +199,14 @@ LastModified
 
 ## Phase 4 - Reporting & Communication
 
-### Status: Next Active Expansion
+### Status: In Progress
 
 ### Automated Reporting
 
 - Generate and distribute scheduled reports
 - Reduce manual report creation
 - Standardize report packs by audience (production, order entry, shipping)
+- Completed foundation: optional report-pack artifact writer now emits CSV/JSON outputs in a stable structure for operations and automation workflows
 
 ### Email Distribution System
 
@@ -212,6 +214,7 @@ LastModified
 - Support configurable distribution lists
 - Manage user-specific report preferences
 - Add notification triggers for production, order entry, and shipping events
+- Completed foundation: distribution-manifest JSON scaffold now maps audience report attachments for future mailer integration
 
 ### Preference Management
 

@@ -47,12 +47,12 @@ def _resolve_max_jobs_per_day(default_value=10):
     return max(parsed, 1)
 
 
-def _build_seed_melt_schedule_from_sorted_groups(sorted_rows):
-    """Return a minimal melt schedule seeded directly from normalized rows."""
-    if sorted_rows is None or sorted_rows.empty:
+def _build_seed_melt_schedule_from_rows(schedule_rows):
+    """Return a minimal single-day melt schedule from normalized rows."""
+    if schedule_rows is None or schedule_rows.empty:
         return {}
 
-    seed_rows = sorted_rows.copy()
+    seed_rows = schedule_rows.copy()
     seed_rows["Pour Schedule Day"] = 1
 
     if "Heat #" not in seed_rows.columns:
@@ -186,8 +186,9 @@ def schedule_molds():
 
         if mold_schedule_frame.empty:
             logger.info("      No mold day assignments were produced.")
-            melt_schedule = _build_seed_melt_schedule_from_sorted_groups(schedule_data_frame)
+            melt_schedule = _build_seed_melt_schedule_from_rows(schedule_data_frame)
             mold_days = []
+            daily_schedules = {}
         else:
             mold_schedule_frame = _prepare_assigned_mold_frame(mold_schedule_frame)
 
@@ -213,7 +214,6 @@ def schedule_molds():
         pour_days = sorted(int(day) for day in melt_schedule.keys())
         mold_day_dates, pour_day_dates = _build_calendar_day_maps(mold_days, pour_days)
 
-        daily_schedules = _build_day_frames(mold_schedule_frame, mold_days)
         export_blocks = build_daily_export_blocks(
             daily_schedules,
             mold_day_dates,

@@ -1,8 +1,7 @@
-"""Runtime melt planning metadata for the experimental scheduler branch.
+"""Melt-planning constants and due-date prioritization helpers.
 
-Legacy heat-assignment and backfill orchestration has been removed from this
-module. The active runtime only needs due-date priority annotation/sorting and
-shared planning constants used by reporting.
+This module currently provides shared planning constants and row-priority
+annotation used by tests and export/reporting code.
 """
 
 import pandas as pd

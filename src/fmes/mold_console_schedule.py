@@ -1,4 +1,4 @@
-"""Console-first mold day scheduling for experimental logic development."""
+"""Mold day scheduling logic for current FMES runtime."""
 
 import pandas as pd
 

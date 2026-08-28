@@ -34,6 +34,36 @@ class SchedulerFilterTests(unittest.TestCase):
         self.assertEqual(filtered_job_counts["added"], 2)
         self.assertEqual(filtered_job_counts["blank"], 1)
 
+    def test_mold_scheduler_resets_counts_each_call(self):
+        first = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: "1001",
+                Columns.COL_HOLD: "NO",
+                Columns.COL_JOB_TYPE: "",
+                Columns.COL_SCHEDULED: "NO",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_MOLDS_NEEDED: 1,
+            }
+        ])
+        second = pd.DataFrame([
+            {
+                Columns.COL_JOB_NUMBER: None,
+                Columns.COL_HOLD: "NO",
+                Columns.COL_JOB_TYPE: "",
+                Columns.COL_SCHEDULED: "NO",
+                Columns.COL_CAST_TYPE: "L",
+                Columns.COL_MOLDS_NEEDED: 1,
+            }
+        ])
+
+        mold_scheduler(first)
+        self.assertEqual(filtered_job_counts["added"], 1)
+        self.assertEqual(filtered_job_counts["blank"], 0)
+
+        mold_scheduler(second)
+        self.assertEqual(filtered_job_counts["added"], 0)
+        self.assertEqual(filtered_job_counts["blank"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,8 @@
-"""
-Schedule-building helpers for the experimental scheduler branch.
+"""Schedule-building helpers for current FMES runtime.
 
-Current responsibilities:
-- Normalize jobs into scheduler-ready rows.
-- Build a weekday-only calendar mapping for schedule day numbers.
+Responsibilities:
+- Normalize eligible jobs into scheduler-ready rows.
+- Build weekday-only calendar mappings for schedule day numbers.
 """
 
 import math
@@ -26,10 +25,10 @@ def _safe_int(value, default=0):
 
 def expand_job(job):
     """
-    Build a single scheduler row for one job (no extension splitting).
+    Build one scheduler row for one eligible job.
 
-    This branch intentionally removes extension chunking. The returned row keeps
-    compatible export columns so report formatting code continues to work.
+    The current runtime keeps a one-row-per-job model and uses Molds for EXT as
+    the mold quantity the day-assignment stage can split across days.
     """
     try:
         molds_needed = _safe_int(job[Columns.COL_MOLDS_NEEDED], default=0)

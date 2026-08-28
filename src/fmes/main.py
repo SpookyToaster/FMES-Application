@@ -16,6 +16,8 @@ from datetime import datetime
 
 from .config import Paths
 from .database import validate_database_environment
+from .report_email import send_report_pack_email
+from .report_pack import write_reporting_pack
 from .scheduler import schedule_molds
 from .scheduler_export import export_combined_schedule_workbook
 
@@ -23,6 +25,7 @@ from .scheduler_export import export_combined_schedule_workbook
 logger = logging.getLogger(__name__)
 
 DEFAULT_MOLD_OUTPUT = str(Paths.COMBINED_SCHEDULE_OUTPUT)
+DEFAULT_REPORT_PACK_OUTPUT = str(Paths.REPORT_PACK_DIR)
 
 
 def _resolve_schedule_source():
@@ -67,6 +70,29 @@ def parse_args():
         help="Output path for combined schedule workbook.",
     )
     parser.add_argument(
+        "--report-pack-dir",
+        default=None,
+        help=(
+            "Optional output directory for production visibility/report-pack artifacts "
+            "(CSV + JSON)."
+        ),
+    )
+    parser.add_argument(
+        "--send-report-email",
+        action="store_true",
+        help="Send report-pack artifacts by SMTP email after run completion.",
+    )
+    parser.add_argument(
+        "--email-test-recipient",
+        default=None,
+        help="Single recipient email for test sends (overrides manifest recipients).",
+    )
+    parser.add_argument(
+        "--email-audiences",
+        default=None,
+        help="Comma-separated audiences to send (defaults to all in manifest).",
+    )
+    parser.add_argument(
         "--no-pause",
         action="store_true",
         help="Exit immediately instead of waiting for Enter (for automation).",
@@ -74,7 +100,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def run(output_file=DEFAULT_MOLD_OUTPUT):
+def run(
+    output_file=DEFAULT_MOLD_OUTPUT,
+    report_pack_dir=None,
+    send_report_email=False,
+    email_test_recipient=None,
+    email_audiences=None,
+):
     """
     Execute full scheduler run and export one combined workbook.
 
@@ -111,9 +143,36 @@ def run(output_file=DEFAULT_MOLD_OUTPUT):
     )
     logger.info("      Saved: %s", output_file)
 
+    report_pack_result = None
+    if report_pack_dir or send_report_email:
+        effective_report_pack_dir = report_pack_dir or DEFAULT_REPORT_PACK_OUTPUT
+        logger.info("[5/5] Writing reporting pack artifacts...")
+        report_pack_result = write_reporting_pack(
+            schedule_result=schedule_result,
+            output_dir=effective_report_pack_dir,
+        )
+        logger.info("      Reporting pack: %s", report_pack_result["output_dir"])
+
+    email_result = None
+    if send_report_email:
+        logger.info("[6/6] Sending report-pack email...")
+        email_result = send_report_pack_email(
+            report_pack_result=report_pack_result,
+            schedule_source=schedule_source,
+            requested_audiences=email_audiences,
+            test_recipient=email_test_recipient,
+        )
+        logger.info(
+            "      Email sent to %s recipient(s): %s",
+            email_result["recipient_count"],
+            ", ".join(email_result["recipients"]),
+        )
+
     return {
         "combined_output_file": output_file,
         "day_block_count": len(export_blocks),
+        "report_pack": report_pack_result,
+        "email": email_result,
     }
 
 
@@ -139,12 +198,30 @@ def main():
 
     exit_code = 0
     try:
-        result = run(output_file=args.output_file)
+        report_pack_dir = args.report_pack_dir
+        if isinstance(report_pack_dir, str) and report_pack_dir.strip().lower() == "default":
+            report_pack_dir = DEFAULT_REPORT_PACK_OUTPUT
+
+        email_test_recipient = args.email_test_recipient
+        if isinstance(email_test_recipient, str):
+            email_test_recipient = email_test_recipient.strip() or None
+
+        result = run(
+            output_file=args.output_file,
+            report_pack_dir=report_pack_dir,
+            send_report_email=args.send_report_email,
+            email_test_recipient=email_test_recipient,
+            email_audiences=args.email_audiences,
+        )
 
         logger.info("=" * 60)
         logger.info("Scheduler run complete.")
         logger.info("Combined schedule workbook: %s", result["combined_output_file"])
         logger.info("Production days scheduled: %s", result["day_block_count"])
+        if result.get("report_pack"):
+            logger.info("Reporting pack directory: %s", result["report_pack"]["output_dir"])
+        if result.get("email"):
+            logger.info("Email recipients: %s", ", ".join(result["email"]["recipients"]))
         logger.info("=" * 60)
     except Exception:
         logger.exception("Scheduler run FAILED.")

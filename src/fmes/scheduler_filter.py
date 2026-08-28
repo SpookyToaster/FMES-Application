@@ -1,18 +1,16 @@
-"""
-Job filtering logic for Foundry Management and Execution System (FMES).
+"""Job filtering logic for Foundry Management and Execution System (FMES).
 
-Filters the raw Open Order Report down to only the jobs that should be
-scheduled for mold production on the upcoming days.
+Filters Open Order Report rows down to jobs eligible for mold scheduling.
 
 Exclusion rules (applied in order):
-  - Blank job number
-  - Hold flag = YES
-  - Job type in [IFA, IFC]  (investment/flask jobs, not mold-poured)
-  - Casting type = I        (investment casting)
-  - Molds Needed <= 0
+    - Blank job number
+    - Hold flag = YES
+    - Job type in [IFA, IFC]  (investment/flask jobs, not mold-poured)
+    - Casting type = I        (investment casting)
+    - Molds Needed <= 0
 
-The module-level filtered_job_counts dict accumulates counts across calls
-for diagnostic reporting.
+The module-level filtered_job_counts dict stores counts for the most recent
+call. Counts are reset at the start of each mold_scheduler() execution.
 """
 
 import pandas as pd
@@ -30,12 +28,18 @@ filtered_job_counts = {
 }
 
 
-def mold_scheduler(ReadyToMold):
+def _reset_filter_counts():
+    """Reset module-level filter counters before each scheduling run."""
+    for key in filtered_job_counts:
+        filtered_job_counts[key] = 0
+
+
+def mold_scheduler(ready_to_mold):
     """
     Filter a DataFrame of open orders down to jobs eligible for mold scheduling.
 
     Args:
-        ReadyToMold: pandas DataFrame from the Open Order Report (sheet 'OOR').
+        ready_to_mold: pandas DataFrame from the Open Order Report (sheet 'OOR').
 
     Returns:
         list of Series – one entry per job row that passed all filters.
@@ -44,9 +48,10 @@ def mold_scheduler(ReadyToMold):
         RuntimeError: Wraps any unexpected exception.
     """
     try:
+        _reset_filter_counts()
         jobs_to_schedule = []
 
-        for _, job in ReadyToMold.iterrows():
+        for _, job in ready_to_mold.iterrows():
             if pd.isna(job[Columns.COL_JOB_NUMBER]):
                 filtered_job_counts["blank"] += 1
                 continue
