@@ -31,7 +31,11 @@ from .scheduler_export import (
 )
 
 from .scheduler_filter import mold_scheduler
-from .scheduler_io import read_file, sync_open_order_report_with_sql
+from .scheduler_io import (
+    build_mold_input_diagnostics_rows,
+    read_file,
+    sync_open_order_report_with_sql,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -169,6 +173,13 @@ def schedule_molds():
     try:
         schedule_source = os.getenv("SCHEDULER_INPUT_SOURCE", "sql").strip().lower()
         input_file = _load_scheduler_input(schedule_source)
+        mold_input_diagnostics_rows = []
+        if schedule_source == "sql":
+            mold_input_diagnostics_rows = build_mold_input_diagnostics_rows(input_file)
+            logger.info(
+                "      Mold input diagnostics flagged %s job(s).",
+                len(mold_input_diagnostics_rows),
+            )
 
         logger.info("      Loaded %s open order rows.", len(input_file))
 
@@ -235,6 +246,7 @@ def schedule_molds():
             "mold_day_dates": mold_day_dates,
             "pour_day_dates": pour_day_dates,
             "job_shipping_rows": job_shipping_rows,
+            "mold_input_diagnostics_rows": mold_input_diagnostics_rows,
         }
     except Exception as exc:
         raise RuntimeError("Schedule_Molds failed during orchestration") from exc

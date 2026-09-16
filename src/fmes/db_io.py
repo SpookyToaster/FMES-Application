@@ -135,6 +135,64 @@ MAIN_DASHBOARD_LIVE_SQL = """
         GROUP BY
             UPPER(LTRIM(RTRIM(COALESCE(NULLIF(d.JOBNUMBER, ''), NULLIF(h.JOBNUMBER, '')))))
     ),
+    BomToolCandidates AS (
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOM jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOMBrowse jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOMBuild jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOMGroup jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOMLvl jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            UPPER(LTRIM(RTRIM(jb.JOBNUMBER))) AS JobNumber,
+            NULLIF(TRY_CONVERT(decimal(18, 6), jb.TOOLIMPRESSIONS), 0) AS ToolImpressions
+        FROM dbo.JCJobBOO jb
+        WHERE NULLIF(LTRIM(RTRIM(jb.JOBNUMBER)), '') IS NOT NULL
+    ),
+    BomToolImpressions AS (
+        SELECT
+            o.JobNumber,
+            MIN(c.ToolImpressions) AS BomCastingsPerMold,
+            COUNT(c.ToolImpressions) AS BomToolRows,
+            COUNT(DISTINCT c.ToolImpressions) AS BomDistinctToolImpressions
+        FROM OpenOrdersAgg o
+        LEFT JOIN BomToolCandidates c
+            ON c.JobNumber = o.JobNumber
+        GROUP BY o.JobNumber
+    ),
     HeatAgg AS (
         SELECT
             JobNumber,
@@ -165,8 +223,26 @@ MAIN_DASHBOARD_LIVE_SQL = """
                 WHEN o.OpenQtyOrdered IS NULL THEN m.QuantityOfCastings
                 ELSE o.OpenQtyOrdered
             END AS QtyOrderedFinal,
-            m.QuantityOfMolds,
-            m.CastingsPerMold,
+            m.QuantityOfMolds AS JobMasterMoldsRequired,
+            m.CastingsPerMold AS JobMasterCastingsPerMold,
+            b.BomCastingsPerMold,
+            b.BomToolRows,
+            b.BomDistinctToolImpressions,
+            CASE
+                WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN m.CastingsPerMold
+                WHEN COALESCE(b.BomToolRows, 0) > 0
+                     AND COALESCE(b.BomDistinctToolImpressions, 0) = 1
+                    THEN COALESCE(b.BomCastingsPerMold, 0)
+                ELSE 0
+            END AS CastingsPerMold,
+            CASE
+                WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN 'JOBMASTER'
+                WHEN COALESCE(b.BomToolRows, 0) > 0
+                     AND COALESCE(b.BomDistinctToolImpressions, 0) = 1
+                    THEN 'BOM_CONSISTENT'
+                WHEN COALESCE(b.BomDistinctToolImpressions, 0) > 1 THEN 'BOM_CONFLICT'
+                ELSE 'MISSING'
+            END AS MoldDerivationSource,
             m.QuantityOfCores,
             m.PourWeight,
             m.TotalPourWT,
@@ -179,6 +255,8 @@ MAIN_DASHBOARD_LIVE_SQL = """
         FROM OpenOrdersAgg o
         LEFT JOIN MainOpenOrders m
             ON o.JobNumber = m.JobNumber
+        LEFT JOIN BomToolImpressions b
+            ON b.JobNumber = o.JobNumber
         LEFT JOIN HeatAgg h
             ON h.JobNumber = o.JobNumber
         LEFT JOIN dbo.ICMaster icAlt
@@ -193,13 +271,35 @@ MAIN_DASHBOARD_LIVE_SQL = """
         Alloy AS [Alloy],
         CastingType AS [Casting Type],
         CAST(COALESCE(QtyOrderedFinal, 0) AS decimal(18, 4)) AS [QTY Ordered],
-        CAST(COALESCE(QuantityOfMolds, 0) AS decimal(18, 4)) AS [Quantity of Molds],
+        CAST(
+            CASE
+                WHEN COALESCE(CastingsPerMold, 0) > 0 AND COALESCE(QtyOrderedFinal, 0) > 0
+                    THEN CEILING(QtyOrderedFinal / CastingsPerMold)
+                WHEN COALESCE(JobMasterMoldsRequired, 0) > 0
+                    THEN JobMasterMoldsRequired
+                ELSE 0
+            END
+            AS decimal(18, 4)
+        ) AS [Quantity of Molds],
+        CAST(COALESCE(JobMasterMoldsRequired, 0) AS decimal(18, 4)) AS [ERP Molds Required],
         CAST(COALESCE(CastingsPerMold, 0) AS decimal(18, 4)) AS [Castings Per Mold],
+        CAST(COALESCE(BomCastingsPerMold, 0) AS decimal(18, 4)) AS [BOM Castings Per Mold],
+        CAST(COALESCE(BomToolRows, 0) AS int) AS [BOM Tool Rows],
+        CAST(COALESCE(BomDistinctToolImpressions, 0) AS int) AS [BOM Distinct Tool Impressions],
+        MoldDerivationSource AS [Molds Derivation Source],
+        CAST(
+            CASE
+                WHEN COALESCE(CastingsPerMold, 0) > 0 AND COALESCE(QtyOrderedFinal, 0) > 0
+                    THEN CEILING(QtyOrderedFinal / CastingsPerMold)
+                ELSE NULL
+            END
+            AS decimal(18, 4)
+        ) AS [Molds Calculated from Qty/Tool],
         CAST(COALESCE(QuantityOfCores, 0) AS decimal(18, 4)) AS [Quantity of Cores],
         CAST(COALESCE(PourWeight, 0) AS decimal(18, 4)) AS [Pour Weight],
         -- POURQUANTITY stays 0 until pours are recorded, so derive total from per-mold weight.
         CAST(
-            COALESCE(NULLIF(TotalPourWT, 0), PourWeight * QuantityOfMolds, 0)
+            COALESCE(NULLIF(TotalPourWT, 0), PourWeight * JobMasterMoldsRequired, 0)
             AS decimal(18, 4)
         ) AS [Total Pour WT],
         CAST(COALESCE(OpenTotalValue, TotalValue, 0) AS decimal(18, 4)) AS [Total Value],

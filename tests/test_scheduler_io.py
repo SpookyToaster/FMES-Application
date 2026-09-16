@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.alloy_compatibility import can_alloy_share_heat_with
 from fmes.scheduler_io import (
+    build_mold_input_diagnostics_rows,
     read_file,
     SQL_MAIN_EXPORT_COLUMNS,
     sync_open_order_report_with_sql,
@@ -173,6 +174,49 @@ class SchedulerIOTests(unittest.TestCase):
 
         self.assertEqual(frame.iloc[0]["Quantity of Molds"], 6)
         self.assertEqual(frame.iloc[0]["Molds Needed"], 5)
+
+    def test_build_mold_input_diagnostics_rows_flags_erp_mismatch(self):
+        frame = pd.DataFrame([
+            {
+                "Job Number": "ATHF",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "QTY Ordered": 10,
+                "Quantity of Molds": 5,
+                "ERP Molds Required": 155,
+                "Castings Per Mold": 2,
+                "Molds Derivation Source": "JOBMASTER",
+                "Molds Calculated from Qty/Tool": 5,
+                "Molds Completed": 0,
+                "Molds Needed": 5,
+            }
+        ])
+
+        diagnostics = build_mold_input_diagnostics_rows(frame)
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0]["Job Number"], "ATHF")
+        self.assertEqual(diagnostics[0]["Diagnostic Flag"], "ERP_MOLDS_MISMATCH")
+
+    def test_build_mold_input_diagnostics_rows_flags_bom_conflict(self):
+        frame = pd.DataFrame([
+            {
+                "Job Number": "JOB-1",
+                "QTY Ordered": 20,
+                "Quantity of Molds": 0,
+                "ERP Molds Required": 0,
+                "Castings Per Mold": 0,
+                "Molds Derivation Source": "BOM_CONFLICT",
+                "BOM Tool Rows": 4,
+                "BOM Distinct Tool Impressions": 2,
+                "Molds Calculated from Qty/Tool": 0,
+                "Molds Completed": 0,
+                "Molds Needed": 0,
+            }
+        ])
+
+        diagnostics = build_mold_input_diagnostics_rows(frame)
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0]["Diagnostic Flag"], "BOM_CONFLICT_NO_FALLBACK")
 
     def test_read_file_sql_wraps_failures(self):
         with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):

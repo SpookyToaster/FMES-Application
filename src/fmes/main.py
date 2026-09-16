@@ -178,6 +178,7 @@ def run(
         job_shipping_rows=schedule_result.get("job_shipping_rows", []),
         mold_schedule_frame=schedule_result.get("mold_schedule_frame", None),
         mold_day_dates=schedule_result.get("mold_day_dates", None),
+        mold_input_diagnostics_rows=schedule_result.get("mold_input_diagnostics_rows", []),
     )
     logger.info("      Saved: %s", output_file)
 

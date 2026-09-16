@@ -459,6 +459,7 @@ def export_combined_schedule_workbook(
     job_shipping_rows=None,
     mold_schedule_frame=None,
     mold_day_dates=None,
+    mold_input_diagnostics_rows=None,
 ):
     """Export one combined workbook with management summaries and department schedules."""
     try:
@@ -473,6 +474,11 @@ def export_combined_schedule_workbook(
                 export_blocks,
                 str(mold_path),
                 job_shipping_rows=job_shipping_rows or [],
+                mold_input_diagnostics_rows=(
+                    mold_input_diagnostics_rows
+                    if mold_input_diagnostics_rows is not None
+                    else []
+                ),
             )
             export_heat_summary(
                 melt_schedule,
@@ -504,6 +510,11 @@ def export_combined_schedule_workbook(
                 (source_heat_wb, "Melt Mgmt Summary", "Melt Summary"),
                 (source_mold_wb, mold_summary_source, "Mold Summary"),
             ]
+
+            if "Mold Input Diagnostics" in source_mold_wb.sheetnames:
+                sheet_plan.append(
+                    (source_mold_wb, "Mold Input Diagnostics", "Mold Input Diagnostics")
+                )
 
             for source_wb, source_name, target_name in sheet_plan:
                 if source_name not in source_wb.sheetnames:
@@ -1269,7 +1280,91 @@ def _write_overall_job_status_sheet(ws_job_status, job_shipping_rows, bold, thin
     _apply_letter_portrait_layout(ws_job_status)
 
 
-def export_mold_schedule(export_blocks, output_file="Mold Schedule.xlsx", job_shipping_rows=None, melt_schedule=None, day_dates=None):
+def _write_mold_input_diagnostics_sheet(ws_diag, mold_input_diagnostics_rows, bold, thin, fill_yellow, fill_orange, fill_red, fill_gray):
+    """Write the Mold Input Diagnostics worksheet."""
+    headers = [
+        "Job Number",
+        "Customer Name",
+        "Part Number",
+        "QTY Ordered",
+        "Castings Per Mold (Effective)",
+        "Tool Impressions Source",
+        "BOM Castings Per Mold",
+        "BOM Tool Rows",
+        "BOM Distinct Tool Impressions",
+        "ERP Molds Required",
+        "Program Quantity of Molds",
+        "Molds Calculated from Qty/Tool",
+        "Delta (Calculated - ERP)",
+        "Molds Completed",
+        "Molds Needed",
+        "Diagnostic Flag",
+    ]
+
+    for col_num, header in enumerate(headers, start=1):
+        cell = ws_diag.cell(1, col_num, header)
+        cell.font = bold
+        cell.border = thin
+
+    if not mold_input_diagnostics_rows:
+        ws_diag.cell(2, 1, "No non-OK mold-input diagnostics were detected.")
+        ws_diag.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+        ws_diag.cell(2, 1).alignment = Alignment(horizontal="left", vertical="center")
+    else:
+        row_num = 2
+        for row in mold_input_diagnostics_rows:
+            values = [row.get(header, "") for header in headers]
+
+            for col_num, value in enumerate(values, start=1):
+                cell = ws_diag.cell(row_num, col_num, value)
+                cell.border = thin
+                if col_num >= 4 and col_num <= 15 and value not in ("", None):
+                    cell.number_format = "#,##0.00"
+
+            flag_value = str(row.get("Diagnostic Flag", "") or "").strip().upper()
+            if flag_value == "BOM_CONFLICT_NO_FALLBACK":
+                ws_diag.cell(row_num, 16).fill = fill_red
+            elif flag_value == "NO_EFFECTIVE_TOOL_IMPRESSIONS":
+                ws_diag.cell(row_num, 16).fill = fill_orange
+            elif flag_value == "USED_BOM_FALLBACK":
+                ws_diag.cell(row_num, 16).fill = fill_yellow
+            elif flag_value == "ERP_MOLDS_MISMATCH":
+                ws_diag.cell(row_num, 16).fill = fill_gray
+
+            row_num += 1
+
+    widths = {
+        "A": 12,
+        "B": 24,
+        "C": 16,
+        "D": 12,
+        "E": 15,
+        "F": 19,
+        "G": 16,
+        "H": 12,
+        "I": 15,
+        "J": 14,
+        "K": 16,
+        "L": 18,
+        "M": 16,
+        "N": 13,
+        "O": 11,
+        "P": 28,
+    }
+    for col, width in widths.items():
+        ws_diag.column_dimensions[col].width = width
+
+    _apply_letter_portrait_layout(ws_diag)
+
+
+def export_mold_schedule(
+    export_blocks,
+    output_file="Mold Schedule.xlsx",
+    job_shipping_rows=None,
+    melt_schedule=None,
+    day_dates=None,
+    mold_input_diagnostics_rows=None,
+):
     """
     Write the mold schedule to an Excel workbook.
 
@@ -1323,6 +1418,23 @@ def export_mold_schedule(export_blocks, output_file="Mold Schedule.xlsx", job_sh
                 bold,
                 thin,
                 fill_green,
+                fill_orange,
+                fill_red,
+                fill_gray,
+            )
+
+        if mold_input_diagnostics_rows is not None:
+            fill_yellow = PatternFill(fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
+            fill_orange = PatternFill(fill_type="solid", start_color="FCE4D6", end_color="FCE4D6")
+            fill_red = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
+            fill_gray = PatternFill(fill_type="solid", start_color="E7E6E6", end_color="E7E6E6")
+            ws_diag = wb.create_sheet("Mold Input Diagnostics")
+            _write_mold_input_diagnostics_sheet(
+                ws_diag,
+                mold_input_diagnostics_rows,
+                bold,
+                thin,
+                fill_yellow,
                 fill_orange,
                 fill_red,
                 fill_gray,

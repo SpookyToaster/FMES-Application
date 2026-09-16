@@ -350,6 +350,103 @@ def _normalize_sql_rows(raw_rows):
     return frame
 
 
+def build_mold_input_diagnostics_rows(frame):
+    """Return non-OK job diagnostics for mold quantity derivation inputs."""
+    if frame is None or frame.empty:
+        return []
+
+    working = frame.copy()
+    working.columns = working.columns.str.strip()
+
+    quantity_of_molds = _coerce_numeric(
+        working["Quantity of Molds"] if "Quantity of Molds" in working.columns else pd.Series(0, index=working.index)
+    )
+    qty_ordered = _coerce_numeric(
+        working["QTY Ordered"] if "QTY Ordered" in working.columns else pd.Series(0, index=working.index)
+    )
+    castings_per_mold = _coerce_numeric(
+        working["Castings Per Mold"] if "Castings Per Mold" in working.columns else pd.Series(0, index=working.index)
+    )
+    erp_molds_required = _coerce_numeric(
+        working["ERP Molds Required"] if "ERP Molds Required" in working.columns else quantity_of_molds
+    )
+
+    if "Molds Calculated from Qty/Tool" in working.columns:
+        molds_calculated = _coerce_numeric(working["Molds Calculated from Qty/Tool"])
+    else:
+        fallback_values = (qty_ordered / castings_per_mold.replace(0, pd.NA)).fillna(0)
+        molds_calculated = fallback_values.apply(
+            lambda value: int(math.ceil(float(value))) if float(value) > 0 else 0
+        )
+
+    mold_source = (
+        working["Molds Derivation Source"]
+        if "Molds Derivation Source" in working.columns
+        else pd.Series("UNKNOWN", index=working.index)
+    )
+    mold_source = mold_source.fillna("UNKNOWN").astype(str).str.strip().str.upper()
+
+    bom_tool_rows = _coerce_numeric(
+        working["BOM Tool Rows"] if "BOM Tool Rows" in working.columns else pd.Series(0, index=working.index)
+    )
+    bom_distinct_tools = _coerce_numeric(
+        working["BOM Distinct Tool Impressions"] if "BOM Distinct Tool Impressions" in working.columns else pd.Series(0, index=working.index)
+    )
+    bom_castings_per_mold = _coerce_numeric(
+        working["BOM Castings Per Mold"] if "BOM Castings Per Mold" in working.columns else pd.Series(0, index=working.index)
+    )
+
+    diagnostic_flag = pd.Series("OK", index=working.index, dtype="object")
+    diagnostic_flag.loc[mold_source == "BOM_CONFLICT"] = "BOM_CONFLICT_NO_FALLBACK"
+    diagnostic_flag.loc[(diagnostic_flag == "OK") & (mold_source == "MISSING")] = "NO_EFFECTIVE_TOOL_IMPRESSIONS"
+    diagnostic_flag.loc[(diagnostic_flag == "OK") & (mold_source == "BOM_CONSISTENT")] = "USED_BOM_FALLBACK"
+
+    mismatch_mask = (
+        (diagnostic_flag == "OK")
+        & (molds_calculated > 0)
+        & ((erp_molds_required - molds_calculated).abs() > 0.0001)
+    )
+    diagnostic_flag.loc[mismatch_mask] = "ERP_MOLDS_MISMATCH"
+
+    delta_vs_erp = molds_calculated - erp_molds_required
+
+    diagnostics = pd.DataFrame(
+        {
+            "Job Number": working.get(Columns.COL_JOB_NUMBER, pd.Series("", index=working.index)),
+            "Customer Name": working.get("Customer Name", pd.Series("", index=working.index)),
+            "Part Number": working.get("Part Number", pd.Series("", index=working.index)),
+            "QTY Ordered": qty_ordered,
+            "Castings Per Mold (Effective)": castings_per_mold,
+            "Tool Impressions Source": mold_source,
+            "BOM Castings Per Mold": bom_castings_per_mold,
+            "BOM Tool Rows": bom_tool_rows,
+            "BOM Distinct Tool Impressions": bom_distinct_tools,
+            "ERP Molds Required": erp_molds_required,
+            "Program Quantity of Molds": quantity_of_molds,
+            "Molds Calculated from Qty/Tool": molds_calculated,
+            "Delta (Calculated - ERP)": delta_vs_erp,
+            "Molds Completed": _coerce_numeric(working.get("Molds Completed", pd.Series(0, index=working.index))),
+            "Molds Needed": _coerce_numeric(working.get(Columns.COL_MOLDS_NEEDED, pd.Series(0, index=working.index))),
+            "Diagnostic Flag": diagnostic_flag,
+        }
+    )
+
+    diagnostics = diagnostics[diagnostics["Diagnostic Flag"] != "OK"].copy()
+    if diagnostics.empty:
+        return []
+
+    severity_rank = {
+        "BOM_CONFLICT_NO_FALLBACK": 0,
+        "NO_EFFECTIVE_TOOL_IMPRESSIONS": 1,
+        "USED_BOM_FALLBACK": 2,
+        "ERP_MOLDS_MISMATCH": 3,
+    }
+    diagnostics["_sort_rank"] = diagnostics["Diagnostic Flag"].map(severity_rank).fillna(9)
+    diagnostics = diagnostics.sort_values(by=["_sort_rank", "Job Number"], kind="stable")
+    diagnostics = diagnostics.drop(columns=["_sort_rank"])
+    return diagnostics.to_dict(orient="records")
+
+
 def read_file(
     filepath=DEFAULT_OPEN_ORDER_REPORT_PATH,
     source="excel",
