@@ -1289,6 +1289,7 @@ def _write_mold_input_diagnostics_sheet(ws_diag, mold_input_diagnostics_rows, bo
         "QTY Ordered",
         "Castings Per Mold (Effective)",
         "Tool Impressions Source",
+        "Pattern Castings Per Mold",
         "BOM Castings Per Mold",
         "BOM Tool Rows",
         "BOM Distinct Tool Impressions",
@@ -1323,13 +1324,15 @@ def _write_mold_input_diagnostics_sheet(ws_diag, mold_input_diagnostics_rows, bo
 
             flag_value = str(row.get("Diagnostic Flag", "") or "").strip().upper()
             if flag_value == "BOM_CONFLICT_NO_FALLBACK":
-                ws_diag.cell(row_num, 16).fill = fill_red
+                ws_diag.cell(row_num, 17).fill = fill_red
             elif flag_value == "NO_EFFECTIVE_TOOL_IMPRESSIONS":
-                ws_diag.cell(row_num, 16).fill = fill_orange
+                ws_diag.cell(row_num, 17).fill = fill_orange
+            elif flag_value == "USED_PATTERN_FALLBACK":
+                ws_diag.cell(row_num, 17).fill = fill_yellow
             elif flag_value == "USED_BOM_FALLBACK":
-                ws_diag.cell(row_num, 16).fill = fill_yellow
+                ws_diag.cell(row_num, 17).fill = fill_yellow
             elif flag_value == "ERP_MOLDS_MISMATCH":
-                ws_diag.cell(row_num, 16).fill = fill_gray
+                ws_diag.cell(row_num, 17).fill = fill_gray
 
             row_num += 1
 
@@ -1341,15 +1344,16 @@ def _write_mold_input_diagnostics_sheet(ws_diag, mold_input_diagnostics_rows, bo
         "E": 15,
         "F": 19,
         "G": 16,
-        "H": 12,
-        "I": 15,
-        "J": 14,
-        "K": 16,
-        "L": 18,
-        "M": 16,
-        "N": 13,
-        "O": 11,
-        "P": 28,
+        "H": 16,
+        "I": 12,
+        "J": 15,
+        "K": 14,
+        "L": 16,
+        "M": 18,
+        "N": 16,
+        "O": 13,
+        "P": 11,
+        "Q": 28,
     }
     for col, width in widths.items():
         ws_diag.column_dimensions[col].width = width

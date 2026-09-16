@@ -875,6 +875,7 @@ class SchedulerExportTests(unittest.TestCase):
                     "Mold Schedule",
                     "Melt Summary",
                     "Mold Summary",
+                    "Mold Input Diagnostics",
                 ],
             )
             self.assertEqual(wb["Overall Summary"].cell(1, 1).value, "Job Number")
@@ -884,6 +885,7 @@ class SchedulerExportTests(unittest.TestCase):
             self.assertEqual(wb["Mold Schedule"].cell(1, 1).value, "Mold Schedule")
             self.assertEqual(wb["Melt Summary"].cell(1, 1).value, "Pour Date")
             self.assertEqual(wb["Mold Summary"].cell(1, 1).value, "Job Number")
+            self.assertEqual(wb["Mold Input Diagnostics"].cell(1, 1).value, "Job Number")
 
     def test_build_heat_daily_totals_rows(self):
         summary_rows = [

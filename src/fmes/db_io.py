@@ -77,6 +77,10 @@ MAIN_DASHBOARD_LIVE_SQL = """
                 TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), jm.TOOLIMPRESSIONS))), '')),
                 0
             ) AS CastingsPerMold,
+            COALESCE(
+                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), ip.PATTERNIMPRESSIONS))), '')),
+                0
+            ) AS PatternCastingsPerMold,
             COALESCE(jm.MOLDSREQUIRED, 0) AS QuantityOfMolds,
             COALESCE(
                 TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(jm.USERDEFINED6)), '')),
@@ -99,6 +103,8 @@ MAIN_DASHBOARD_LIVE_SQL = """
         FROM dbo.JCJobMaster jm
         LEFT JOIN dbo.ICMaster ic
             ON ic.PRODUCTCODE = jm.PRODUCTCODE
+        LEFT JOIN dbo.ICPattern ip
+            ON ip.PATTERNNUMBER = ic.PATTERNNUMBER
         WHERE NULLIF(LTRIM(RTRIM(jm.JOBNUMBER)), '') IS NOT NULL
           AND jm.JOBSTATUSFLAG = 'I'
     ),
@@ -225,11 +231,14 @@ MAIN_DASHBOARD_LIVE_SQL = """
             END AS QtyOrderedFinal,
             m.QuantityOfMolds AS JobMasterMoldsRequired,
             m.CastingsPerMold AS JobMasterCastingsPerMold,
+            m.PatternCastingsPerMold,
             b.BomCastingsPerMold,
             b.BomToolRows,
             b.BomDistinctToolImpressions,
             CASE
                 WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN m.CastingsPerMold
+                WHEN COALESCE(NULLIF(m.PatternCastingsPerMold, 0), 0) > 0
+                    THEN m.PatternCastingsPerMold
                 WHEN COALESCE(b.BomToolRows, 0) > 0
                      AND COALESCE(b.BomDistinctToolImpressions, 0) = 1
                     THEN COALESCE(b.BomCastingsPerMold, 0)
@@ -237,6 +246,7 @@ MAIN_DASHBOARD_LIVE_SQL = """
             END AS CastingsPerMold,
             CASE
                 WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN 'JOBMASTER'
+                WHEN COALESCE(NULLIF(m.PatternCastingsPerMold, 0), 0) > 0 THEN 'PATTERN'
                 WHEN COALESCE(b.BomToolRows, 0) > 0
                      AND COALESCE(b.BomDistinctToolImpressions, 0) = 1
                     THEN 'BOM_CONSISTENT'
@@ -283,6 +293,7 @@ MAIN_DASHBOARD_LIVE_SQL = """
         ) AS [Quantity of Molds],
         CAST(COALESCE(JobMasterMoldsRequired, 0) AS decimal(18, 4)) AS [ERP Molds Required],
         CAST(COALESCE(CastingsPerMold, 0) AS decimal(18, 4)) AS [Castings Per Mold],
+        CAST(COALESCE(PatternCastingsPerMold, 0) AS decimal(18, 4)) AS [Pattern Castings Per Mold],
         CAST(COALESCE(BomCastingsPerMold, 0) AS decimal(18, 4)) AS [BOM Castings Per Mold],
         CAST(COALESCE(BomToolRows, 0) AS int) AS [BOM Tool Rows],
         CAST(COALESCE(BomDistinctToolImpressions, 0) AS int) AS [BOM Distinct Tool Impressions],

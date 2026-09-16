@@ -186,6 +186,43 @@ Example for revision 0.70:
 - SchedulerUpdateOnly_0.70.exe
 - build-info.txt
 
+### Windows Installer (Inno Setup)
+
+The repository includes an installer project that packages the two EXEs and
+first-run configuration guidance for other users.
+
+Installer source files:
+
+- [installer/SchedulerInstaller.iss](installer/SchedulerInstaller.iss)
+- [installer/FirstRun-Checklist.txt](installer/FirstRun-Checklist.txt)
+- [build_installer.ps1](build_installer.ps1)
+
+Flow:
+
+1. Build fresh EXEs with [build_scheduler.ps1](build_scheduler.ps1).
+2. Install Inno Setup 6 (provides ISCC.exe).
+3. Build the installer:
+
+```powershell
+.\build_installer.ps1
+```
+
+Default behavior:
+
+- Uses the newest `release_*` folder under `%LOCALAPPDATA%\SchedulerProgram\PyInstaller`
+- Produces `FMES_Scheduler_Setup_<label>.exe` in that same release folder
+
+Optional arguments:
+
+```powershell
+.\build_installer.ps1 -ReleasePath "C:\Path\to\release_20260916_130736" -VersionLabel 20260916_130736
+```
+
+Installer prerequisites warning:
+
+- Setup checks for ODBC Driver 17 for SQL Server and warns if missing.
+- Python packages are bundled in the EXEs; no Python install is needed on target machines.
+
 ## Email Send Example
 
 Test-send report pack to one address:

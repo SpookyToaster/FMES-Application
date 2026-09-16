@@ -1,0 +1,43 @@
+FMES Scheduler - First Run Checklist
+===================================
+
+Installed files:
+- Scheduler.exe (full run)
+- SchedulerUpdateOnly.exe (OOR update only)
+- .env.example (template for environment variables)
+
+Required prerequisites:
+1) Microsoft ODBC Driver 17 for SQL Server
+2) Access to the shared schedule root folder (contains Open Order Report.xlsx)
+3) DB credentials configured in environment variables
+
+Recommended prerequisites:
+1) Outlook desktop configured if using Outlook transport
+2) Write access to schedule root subfolders:
+   - Backups
+   - Historical OORs
+   - Historical DB Snapshots
+   - Output
+   - Logs
+
+Environment setup:
+1) Copy .env.example to your preferred secure location.
+2) Set at minimum:
+   - DB_SERVER
+   - DB_NAME
+   - DB_USER
+   - DB_PASSWORD
+3) Optional:
+   - FMES_SCHEDULE_ROOT
+   - FMES_EMAIL_TRANSPORT
+   - FMES_SEND_REPORT_EMAIL
+
+Runtime notes:
+- Full runtime defaults to SQL source unless overridden.
+- If FMES_SCHEDULE_ROOT is not set, the app resolves OneDrive-based defaults.
+- Email sends can be disabled by setting FMES_SEND_REPORT_EMAIL=0.
+
+Validation steps:
+1) Launch SchedulerUpdateOnly.exe first and verify OOR update succeeds.
+2) Launch Scheduler.exe and verify Production Schedule Summary.xlsx is created.
+3) Confirm the Mold Input Diagnostics sheet exists in the workbook output.

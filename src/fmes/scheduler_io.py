@@ -240,8 +240,12 @@ def _derive_mold_quantity_from_ordered(frame, quantity_of_molds):
     )
 
     fallback_mask = (quantity_of_molds <= 0) & (castings_per_mold > 0) & (qty_ordered > 0)
+    # Manual safety net: one ordered casting must allocate at least one mold.
+    qty_one_manual_mask = (quantity_of_molds <= 0) & (qty_ordered == 1)
+
     derived_quantity = quantity_of_molds.where(~fallback_mask, fallback_values)
-    return derived_quantity, fallback_mask
+    derived_quantity = derived_quantity.where(~qty_one_manual_mask, 1)
+    return derived_quantity, (fallback_mask | qty_one_manual_mask)
 
 
 def _log_mold_quantity_fallback_usage(frame, fallback_mask):
@@ -395,10 +399,14 @@ def build_mold_input_diagnostics_rows(frame):
     bom_castings_per_mold = _coerce_numeric(
         working["BOM Castings Per Mold"] if "BOM Castings Per Mold" in working.columns else pd.Series(0, index=working.index)
     )
+    pattern_castings_per_mold = _coerce_numeric(
+        working["Pattern Castings Per Mold"] if "Pattern Castings Per Mold" in working.columns else pd.Series(0, index=working.index)
+    )
 
     diagnostic_flag = pd.Series("OK", index=working.index, dtype="object")
     diagnostic_flag.loc[mold_source == "BOM_CONFLICT"] = "BOM_CONFLICT_NO_FALLBACK"
     diagnostic_flag.loc[(diagnostic_flag == "OK") & (mold_source == "MISSING")] = "NO_EFFECTIVE_TOOL_IMPRESSIONS"
+    diagnostic_flag.loc[(diagnostic_flag == "OK") & (mold_source == "PATTERN")] = "USED_PATTERN_FALLBACK"
     diagnostic_flag.loc[(diagnostic_flag == "OK") & (mold_source == "BOM_CONSISTENT")] = "USED_BOM_FALLBACK"
 
     mismatch_mask = (
@@ -418,6 +426,7 @@ def build_mold_input_diagnostics_rows(frame):
             "QTY Ordered": qty_ordered,
             "Castings Per Mold (Effective)": castings_per_mold,
             "Tool Impressions Source": mold_source,
+            "Pattern Castings Per Mold": pattern_castings_per_mold,
             "BOM Castings Per Mold": bom_castings_per_mold,
             "BOM Tool Rows": bom_tool_rows,
             "BOM Distinct Tool Impressions": bom_distinct_tools,
@@ -438,8 +447,9 @@ def build_mold_input_diagnostics_rows(frame):
     severity_rank = {
         "BOM_CONFLICT_NO_FALLBACK": 0,
         "NO_EFFECTIVE_TOOL_IMPRESSIONS": 1,
-        "USED_BOM_FALLBACK": 2,
-        "ERP_MOLDS_MISMATCH": 3,
+        "USED_PATTERN_FALLBACK": 2,
+        "USED_BOM_FALLBACK": 3,
+        "ERP_MOLDS_MISMATCH": 4,
     }
     diagnostics["_sort_rank"] = diagnostics["Diagnostic Flag"].map(severity_rank).fillna(9)
     diagnostics = diagnostics.sort_values(by=["_sort_rank", "Job Number"], kind="stable")

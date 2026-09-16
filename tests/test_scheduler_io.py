@@ -175,6 +175,31 @@ class SchedulerIOTests(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["Quantity of Molds"], 6)
         self.assertEqual(frame.iloc[0]["Molds Needed"], 5)
 
+    def test_read_file_sql_defaults_single_order_to_one_mold_when_tool_missing(self):
+        sql_rows = [
+            {
+                "Due Date": "2026-08-04",
+                "Customer Name": "Customer",
+                "Part Number": "P1",
+                "Job Type": "JOB",
+                "Job Number": "9002",
+                "Alloy": "A",
+                "Casting Type": "L",
+                "QTY Ordered": 1,
+                "Quantity of Molds": 0,
+                "Castings Per Mold": 0,
+                "Quantity of Cores": 1,
+                "Pour Weight": 100,
+                "Molds Completed": 0,
+            }
+        ]
+
+        with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", return_value=sql_rows):
+            frame = read_file(source="sql")
+
+        self.assertEqual(frame.iloc[0]["Quantity of Molds"], 1)
+        self.assertEqual(frame.iloc[0]["Molds Needed"], 1)
+
     def test_build_mold_input_diagnostics_rows_flags_erp_mismatch(self):
         frame = pd.DataFrame([
             {
@@ -217,6 +242,26 @@ class SchedulerIOTests(unittest.TestCase):
         diagnostics = build_mold_input_diagnostics_rows(frame)
         self.assertEqual(len(diagnostics), 1)
         self.assertEqual(diagnostics[0]["Diagnostic Flag"], "BOM_CONFLICT_NO_FALLBACK")
+
+    def test_build_mold_input_diagnostics_rows_flags_pattern_fallback(self):
+        frame = pd.DataFrame([
+            {
+                "Job Number": "DUHH",
+                "QTY Ordered": 2,
+                "Quantity of Molds": 2,
+                "ERP Molds Required": 0,
+                "Castings Per Mold": 1,
+                "Pattern Castings Per Mold": 1,
+                "Molds Derivation Source": "PATTERN",
+                "Molds Calculated from Qty/Tool": 2,
+                "Molds Completed": 0,
+                "Molds Needed": 2,
+            }
+        ])
+
+        diagnostics = build_mold_input_diagnostics_rows(frame)
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0]["Diagnostic Flag"], "USED_PATTERN_FALLBACK")
 
     def test_read_file_sql_wraps_failures(self):
         with patch("fmes.scheduler_io.get_main_dashboard_scheduler_rows", side_effect=RuntimeError("db down")):
