@@ -22,3 +22,10 @@ Session_Context_*
 
 settings.json
 .vscode/settings.json
+
+# Build/package artifacts should not be versioned in source control.
+deprecated/*.exe
+deprecated/*.msi
+deprecated/*.zip
+installer/Output/
+release_*/

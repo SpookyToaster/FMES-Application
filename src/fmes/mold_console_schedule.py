@@ -83,7 +83,6 @@ def build_mold_schedule_by_alloy_group(schedule_rows_df, max_jobs_per_day=10, re
         l_molds_by_job = {}
         l_molds_on_day = 0
         f_molds_on_day = 0
-        made_progress = False
 
         for item in pending_items:
             if item["remaining"] <= 0:
@@ -119,7 +118,6 @@ def build_mold_schedule_by_alloy_group(schedule_rows_df, max_jobs_per_day=10, re
             assigned_rows.append(row_for_day)
 
             item["remaining"] -= molds_for_chunk
-            made_progress = True
 
             if cast_type == "F":
                 f_molds_on_day += molds_for_chunk
@@ -127,11 +125,7 @@ def build_mold_schedule_by_alloy_group(schedule_rows_df, max_jobs_per_day=10, re
                 l_molds_by_job[job_number] = l_molds_by_job.get(job_number, 0) + molds_for_chunk
                 l_molds_on_day += molds_for_chunk
 
-        if not made_progress:
-            # Advance to the next day when nothing else can fit today.
-            current_day += 1
-            continue
-
+        # Advance one production day per pass and re-evaluate remaining molds.
         current_day += 1
 
     if not assigned_rows:

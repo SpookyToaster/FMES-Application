@@ -23,12 +23,15 @@ class MainReportingPackTests(unittest.TestCase):
             "mold_day_dates": {},
         }
 
-        with patch("fmes.main.schedule_molds", return_value=schedule_result), \
+        with patch.dict(os.environ, {"SCHEDULER_INPUT_SOURCE": "excel"}, clear=True), \
+             patch("fmes.main.schedule_molds", return_value=schedule_result), \
+             patch("fmes.main.validate_database_environment") as validate_database_environment, \
              patch("fmes.main.export_combined_schedule_workbook"), \
              patch("fmes.main.write_reporting_pack", return_value={"output_dir": "C:/tmp/report-pack"}) as write_reporting_pack:
             result = run(output_file="combined.xlsx", report_pack_dir="C:/tmp/report-pack")
 
         self.assertIsNotNone(result["report_pack"])
+        validate_database_environment.assert_not_called()
         write_reporting_pack.assert_called_once()
 
     def test_run_sends_email_when_enabled(self):
@@ -41,7 +44,9 @@ class MainReportingPackTests(unittest.TestCase):
             "mold_day_dates": {},
         }
 
-        with patch("fmes.main.schedule_molds", return_value=schedule_result), \
+        with patch.dict(os.environ, {"SCHEDULER_INPUT_SOURCE": "excel"}, clear=True), \
+             patch("fmes.main.schedule_molds", return_value=schedule_result), \
+             patch("fmes.main.validate_database_environment") as validate_database_environment, \
              patch("fmes.main.export_combined_schedule_workbook"), \
              patch("fmes.main.write_reporting_pack", return_value={"output_dir": "C:/tmp/report-pack", "distribution_manifest": "C:/tmp/report-pack/distribution_manifest.json"}), \
              patch("fmes.main.send_report_pack_email", return_value={"recipient_count": 1, "recipients": ["lburkardt@monettmetals.com"]}) as send_report_pack_email:
@@ -55,6 +60,7 @@ class MainReportingPackTests(unittest.TestCase):
             )
 
         self.assertIsNotNone(result["email"])
+        validate_database_environment.assert_not_called()
         send_report_pack_email.assert_called_once()
         self.assertEqual(send_report_pack_email.call_args.kwargs["transport"], "outlook")
 
