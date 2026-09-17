@@ -214,6 +214,5 @@ class ReportEmailTests(unittest.TestCase):
             self.assertEqual(result["transport"], "outlook")
             send_outlook.assert_called_once()
 
-
 if __name__ == "__main__":
     unittest.main()

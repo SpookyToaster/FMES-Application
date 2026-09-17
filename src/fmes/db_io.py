@@ -78,6 +78,10 @@ MAIN_DASHBOARD_LIVE_SQL = """
                 0
             ) AS CastingsPerMold,
             COALESCE(
+                TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), ic.CASTINGSPERMOLD))), '')),
+                0
+            ) AS ICMasterCastingsPerMold,
+            COALESCE(
                 TRY_CONVERT(decimal(18, 6), NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), ip.PATTERNIMPRESSIONS))), '')),
                 0
             ) AS PatternCastingsPerMold,
@@ -231,12 +235,15 @@ MAIN_DASHBOARD_LIVE_SQL = """
             END AS QtyOrderedFinal,
             m.QuantityOfMolds AS JobMasterMoldsRequired,
             m.CastingsPerMold AS JobMasterCastingsPerMold,
+            m.ICMasterCastingsPerMold,
             m.PatternCastingsPerMold,
             b.BomCastingsPerMold,
             b.BomToolRows,
             b.BomDistinctToolImpressions,
             CASE
                 WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN m.CastingsPerMold
+                WHEN COALESCE(NULLIF(m.ICMasterCastingsPerMold, 0), 0) > 0
+                    THEN m.ICMasterCastingsPerMold
                 WHEN COALESCE(NULLIF(m.PatternCastingsPerMold, 0), 0) > 0
                     THEN m.PatternCastingsPerMold
                 WHEN COALESCE(b.BomToolRows, 0) > 0
@@ -246,6 +253,7 @@ MAIN_DASHBOARD_LIVE_SQL = """
             END AS CastingsPerMold,
             CASE
                 WHEN COALESCE(NULLIF(m.CastingsPerMold, 0), 0) > 0 THEN 'JOBMASTER'
+                WHEN COALESCE(NULLIF(m.ICMasterCastingsPerMold, 0), 0) > 0 THEN 'ICMASTER'
                 WHEN COALESCE(NULLIF(m.PatternCastingsPerMold, 0), 0) > 0 THEN 'PATTERN'
                 WHEN COALESCE(b.BomToolRows, 0) > 0
                      AND COALESCE(b.BomDistinctToolImpressions, 0) = 1

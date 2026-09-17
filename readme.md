@@ -1,207 +1,262 @@
 # Foundry Management and Execution System (FMES)
 
 Author: Logan Burkardt  
-Last Updated: 2026-08-28
+Last Updated: 2026-09-17
 
 ## Overview
 
-FMES is a Python scheduling tool that can:
+FMES is a Python scheduling program. It supports two run modes:
 
-- Sync live SQL data into Open Order Report.xlsx (OOR)
-- Normalize scheduler input fields for consistent downstream processing
-- Filter jobs eligible for mold scheduling
-- Build mold-day assignments
-- Export a combined Production Schedule Summary workbook
+- Full mode: pull live SQL data, update Open Order Report (OOR), schedule jobs, and export workbooks.
+- OOR-only mode: skip SQL sync and build schedules from the existing OOR workbook.
 
-The source code is organized under [src/fmes](src/fmes).
+Primary entrypoints:
 
-## Entrypoints
-
-- [run_scheduler.py](run_scheduler.py): full runtime path (SQL or Excel source)
-- [run_oor_schedule.py](run_oor_schedule.py): OOR-only mode (forces Excel source, skips SQL sync)
-- [src/fmes/main.py](src/fmes/main.py): CLI and orchestration entrypoint
+- [run_scheduler.py](run_scheduler.py): full CLI launcher (source can be SQL or Excel)
+- [run_oor_schedule.py](run_oor_schedule.py): OOR-only launcher (forces Excel source)
+- [src/fmes/main.py](src/fmes/main.py): full run orchestration
 - [src/fmes/oor_main.py](src/fmes/oor_main.py): OOR-only CLI wrapper
 
-CLI option for full runs:
+Core source package: [src/fmes](src/fmes)
 
-- --report-pack-dir <path>: optional directory to emit Phase 3/4 reporting artifacts
-- --report-pack-dir default: uses Paths.REPORT_PACK_DIR
-- --send-report-email: sends report-pack files via SMTP after successful run
-- --email-test-recipient <email>: overrides manifest recipients for safe test sends
-- --email-audiences production,order_entry,shipping: optional audience filter
-- --email-transport smtp|outlook: choose SMTP or installed Outlook desktop transport (default: outlook)
-- FMES_SEND_REPORT_EMAIL=true|false: optional default when --send-report-email is omitted
+## Runtime Flow
 
-## Current Runtime Flow
+Full scheduler flow:
 
-Full run path:
+1. Resolve source from --source or SCHEDULER_INPUT_SOURCE (default sql).
+2. If source is sql:
+    - validate database configuration,
+    - sync live SQL data into the OOR workbook,
+    - refresh OOR Shipping Table sheet from Shipping Table.xlsx (when available).
+3. Read scheduler input (SQL or Excel) and apply normalization.
+4. Filter schedulable jobs.
+5. Build scheduler rows and assign mold schedule days.
+6. Build export blocks and job shipping outlook rows.
+7. Write combined Production Schedule Summary workbook.
+8. Optionally write report-pack artifacts.
+9. Optionally send report-pack email.
 
-1. Resolve source from CLI or SCHEDULER_INPUT_SOURCE
-2. If source is SQL: validate DB settings and sync OOR workbook from SQL
-3. Read scheduler input data frame
-4. Filter rows in [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py)
-5. Build scheduler rows in [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py)
-6. Assign mold schedule days in [src/fmes/mold_console_schedule.py](src/fmes/mold_console_schedule.py)
-7. Build export blocks and shipping summary rows in [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py)
-8. Export combined workbook using [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py)
+OOR-only flow:
 
-## SQL Sync Behavior (OOR Update)
+- Forces SCHEDULER_INPUT_SOURCE=excel.
+- Skips SQL validation and SQL sync.
+- Runs scheduling/export on the workbook contents already in OOR.
 
-During SQL sync, [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) does all of the following:
+## SQL Mold Derivation Logic
 
-- Creates backup and historical OOR snapshots
-- Pulls live scheduler rows from [src/fmes/db_io.py](src/fmes/db_io.py)
-- Validates required text fields (due date, customer, part, job)
-- Normalizes rows before writing to OOR
-- Writes OOR range F2:V* while preserving workbook metadata
-- Writes OOR Column A Hold values directly from SQL "On Hold" data (YES/NO)
-- Refreshes OOR Shipping Table worksheet from Shipping Table.xlsx when available
-- Writes a SQL snapshot workbook for audit/comparison
+Live SQL rows for scheduler input come from [src/fmes/db_io.py](src/fmes/db_io.py) using MAIN_DASHBOARD_LIVE_SQL.
 
-Important normalization rule now active:
+Current castings-per-mold fallback precedence:
 
-- If Quantity of Molds is zero/non-positive and both QTY Ordered and Castings Per Mold are present,
-  Quantity of Molds is derived as ceiling(QTY Ordered / Castings Per Mold).
+1. JCJobMaster.TOOLIMPRESSIONS
+2. ICMaster.CASTINGSPERMOLD
+3. ICPattern.PATTERNIMPRESSIONS
+4. BOM fallback only when BOM tool impressions are present and consistent
+5. missing/unknown when no non-zero source is available
 
-This derived value is now written to OOR Column N because sync writes normalized rows, not raw SQL rows.
+The query also emits a derivation source label in Molds Derivation Source:
+
+- JOBMASTER
+- ICMASTER
+- PATTERN
+- BOM_CONSISTENT
+- BOM_CONFLICT
+- MISSING
+
+Quantity of Molds is derived from QTY Ordered / effective Castings Per Mold when possible; otherwise it falls back to ERP molds required.
+
+## Diagnostics and Validation
+
+When source=sql, FMES builds mold input diagnostics from scheduler input and exports non-OK rows.
+
+Diagnostic flags include:
+
+- BOM_CONFLICT_NO_FALLBACK
+- NO_EFFECTIVE_TOOL_IMPRESSIONS
+- USED_PATTERN_FALLBACK
+- USED_BOM_FALLBACK
+- ERP_MOLDS_MISMATCH
+
+These rows are exported into a Mold Input Diagnostics worksheet in mold/combined outputs.
 
 ## Scheduling Rules (Current)
 
-Eligibility filter in [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py):
+Eligibility filtering in [src/fmes/scheduler_filter.py](src/fmes/scheduler_filter.py):
 
-- Exclude blank job number
-- Exclude hold = YES
-- Exclude Job Type IFA/IFC
-- Exclude Casting Type I
-- Exclude Molds Needed <= 0
-
-Row construction in [src/fmes/scheduler_build.py](src/fmes/scheduler_build.py):
-
-- Uses one row per eligible job in the current branch
-- Sets Molds for EXT from Molds Needed
-- Computes Total Weight per EXT from Pour Weight * Molds for EXT
+- blank Job Number excluded
+- Hold = YES excluded
+- Job Type IFA/IFC excluded
+- Casting Type I excluded
+- Molds Needed <= 0 excluded
 
 Mold-day assignment in [src/fmes/mold_console_schedule.py](src/fmes/mold_console_schedule.py):
 
-- Enforces max jobs per day
-- Enforces per-day and per-job mold capacity rules
-- Splits large jobs across days when needed
+- due-date driven ordering with compatibility-group tie-breaking
+- max unique jobs per day controlled by MOLD_SCHEDULE_MAX_JOBS_PER_DAY (default 10)
+- line molds: max 30/day total and max 6 per job/day
+- floor molds: max 3/day total
+- jobs can split across days as needed
 
 ## Outputs
 
-Primary output workbook:
+### Combined workbook
 
-- Production Schedule Summary.xlsx (default path resolved from [src/fmes/config.py](src/fmes/config.py))
+Default path:
 
-Optional reporting pack output (when --report-pack-dir is provided):
+- Paths.COMBINED_SCHEDULE_OUTPUT from [src/fmes/config.py](src/fmes/config.py)
+- Typical file name: Production Schedule Summary.xlsx
+
+Current combined workbook assembly is handled by [src/fmes/scheduler_export.py](src/fmes/scheduler_export.py) and includes:
+
+- Overall Summary
+- Melt Schedule
+- Melt Diagnostics
+- Mold Schedule
+- Melt Summary
+- Mold Summary
+- Mold Input Diagnostics (when diagnostics rows exist)
+
+### Report pack (optional)
+
+When --report-pack-dir is provided (or when email sending requires report-pack output), [src/fmes/report_pack.py](src/fmes/report_pack.py) writes:
 
 - run_summary.json
 - job_shipping_outlook.csv
 - jobs_requiring_attention.csv
 - daily_capacity_summary.csv
-- report_pack.xlsx (formatted multi-sheet workbook)
-- Open_Order_Report_Updated_YYYYMMDD_HHMMSS.xlsx (copied from current OOR)
+- report_pack.xlsx
+- Open_Order_Report_Updated_YYYYMMDD_HHMMSS.xlsx (copy of current OOR if available)
 - distribution_manifest.json
 
-Email routing model:
+### SQL sync artifacts
 
-- distribution_manifest.json stores audience entries with enabled, recipients, and attachments
-- email attachments are intentionally limited to report_pack.xlsx and Open_Order_Report_Updated_*.xlsx
-- default recipients include sliles@monettmetals.com, BRaub@monettmetals.com, and lburkardt@monettmetals.com
-- send mode can use manifest recipients or a one-off test recipient override
-- packaged Scheduler.exe / SchedulerUpdateOnly.exe runs default to sending email when --send-report-email is omitted
-- set FMES_SEND_REPORT_EMAIL=0 to disable default send behavior for executable runs
+During SQL sync, [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) also writes:
 
-SMTP environment variables (required for send mode):
+- OOR backup copy
+- historical OOR snapshot
+- historical DB snapshot workbook
 
+## Email Behavior
+
+Email send path is implemented in [src/fmes/report_email.py](src/fmes/report_email.py).
+
+Send decision precedence in full/OOR CLI:
+
+1. explicit --send-report-email
+2. FMES_SEND_REPORT_EMAIL environment variable
+3. default True for frozen executable runs, False for normal Python CLI runs
+
+Transport:
+
+- default: outlook
+- options: smtp or outlook via --email-transport
+
+Manifest-driven behavior:
+
+- recipients and attachments come from distribution_manifest.json
+- when --email-test-recipient is provided, it overrides manifest recipients
+- attachment policy is intentionally narrowed to report_pack.xlsx and copied Open_Order_Report_Updated_*.xlsx
+
+## CLI Usage
+
+### Full scheduler
+
+```powershell
+.venv\Scripts\python.exe run_scheduler.py --source sql --output-file "C:\Path\Production Schedule Summary.xlsx"
+```
+
+### OOR-only scheduler
+
+```powershell
+.venv\Scripts\python.exe run_oor_schedule.py --output-file "C:\Path\Production Schedule Summary.xlsx"
+```
+
+### Common options
+
+- --source sql|excel (full scheduler only)
+- --output-file <path>
+- --report-pack-dir <path|default>
+- --send-report-email
+- --email-test-recipient <email>
+- --email-audiences production,order_entry,shipping
+- --email-transport smtp|outlook
+- --no-pause
+
+## Environment Variables
+
+Database and SQL:
+
+- DB_DRIVER
+- DB_SERVER
+- DB_NAME
+- DB_USER
+- DB_PASSWORD
+- DB_CONNECTION_STRING (optional alternative)
+
+Pathing and source behavior:
+
+- FMES_SCHEDULE_ROOT (overrides shared schedule root)
+- SCHEDULER_INPUT_SOURCE (sql|excel default override)
+- FMES_SHIPPING_TABLE_WORKBOOK
+- FMES_SHIPPING_TABLE_SOURCE_SHEET
+- FMES_OOR_SHIPPING_TABLE_SHEET
+
+Email:
+
+- FMES_SEND_REPORT_EMAIL
+- FMES_EMAIL_TEST_RECIPIENT
+- FMES_EMAIL_TRANSPORT
+- FMES_OUTLOOK_FROM
 - FMES_SMTP_HOST
-- FMES_SMTP_PORT (default 587)
+- FMES_SMTP_PORT
 - FMES_SMTP_FROM
-- FMES_SMTP_USERNAME (optional)
-- FMES_SMTP_PASSWORD (required when username is set)
-- FMES_SMTP_USE_STARTTLS (default true)
+- FMES_SMTP_USERNAME
+- FMES_SMTP_PASSWORD
+- FMES_SMTP_USE_STARTTLS
 
-Outlook desktop transport:
-
-- Use --email-transport outlook to send via signed-in Outlook desktop profile.
-- Outlook is the default send transport when no override is provided.
-- Requires Outlook desktop installed and configured on the machine.
-- Requires pywin32 in the Python environment.
-- Optional FMES_OUTLOOK_FROM can set SentOnBehalfOfName when needed.
-
-Supporting artifacts from SQL sync:
-
-- Backups of Open Order Report.xlsx
-- Historical OOR snapshots
-- Historical DB snapshot workbooks
-
-Shipping Table sync source path:
-
-- Defaults to Quality/Schedule/Shipping Table.xlsx
-- Optional override with environment variable FMES_SHIPPING_TABLE_WORKBOOK
-- Source sheet defaults to the source workbook active sheet (first tab)
-- OOR target sheet defaults to Shipped
-- Optional overrides: FMES_SHIPPING_TABLE_SOURCE_SHEET and FMES_OOR_SHIPPING_TABLE_SHEET
-
-## Logging
-
-Logging is configured in [src/fmes/main.py](src/fmes/main.py):
-
-- Console output for operator visibility
-- Monthly log file under Paths.LOG_DIR (fmes_YYYY-MM.log)
+Reference template: [.env.example](.env.example)
 
 ## Testing
 
-Run full unit test suite:
+Run full unittest discovery:
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s tests -q
+.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
-Run fast focused suite:
+Run fast focused tests:
 
 ```powershell
 .\run_fast_tests.ps1
 ```
 
-Current baseline after latest changes:
-
-- 63 tests passing via unittest discovery
-
 ## Build and Packaging
 
-Build versioned executable artifacts with:
+Build versioned executables:
 
 ```powershell
-.\build_scheduler.ps1 -VersionLabel 0.70
+.\build_scheduler.ps1 -VersionLabel 0.83
 ```
 
-Build output location pattern:
+Artifacts are emitted to:
 
 - %LOCALAPPDATA%\SchedulerProgram\PyInstaller\release_<VersionLabel>
 
-Example for revision 0.70:
+Each release folder contains:
 
-- Scheduler_0.70.exe
-- SchedulerUpdateOnly_0.70.exe
+- Scheduler_<VersionLabel>.exe
+- SchedulerUpdateOnly_<VersionLabel>.exe
 - build-info.txt
 
-### Windows Installer (Inno Setup)
+### Windows installer (Inno Setup)
 
-The repository includes an installer project that packages the two EXEs and
-first-run configuration guidance for other users.
-
-Installer source files:
+Installer sources:
 
 - [installer/SchedulerInstaller.iss](installer/SchedulerInstaller.iss)
 - [installer/FirstRun-Checklist.txt](installer/FirstRun-Checklist.txt)
 - [build_installer.ps1](build_installer.ps1)
 
-Flow:
-
-1. Build fresh EXEs with [build_scheduler.ps1](build_scheduler.ps1).
-2. Install Inno Setup 6 (provides ISCC.exe).
-3. Build the installer:
+Build installer:
 
 ```powershell
 .\build_installer.ps1
@@ -209,37 +264,11 @@ Flow:
 
 Default behavior:
 
-- Uses the newest `release_*` folder under `%LOCALAPPDATA%\SchedulerProgram\PyInstaller`
-- Produces `FMES_Scheduler_Setup_<label>.exe` in that same release folder
+- uses newest release_* folder under %LOCALAPPDATA%\SchedulerProgram\PyInstaller
+- outputs FMES_Scheduler_Setup_<label>.exe in that release folder
 
-Optional arguments:
+## Troubleshooting Notes
 
-```powershell
-.\build_installer.ps1 -ReleasePath "C:\Path\to\release_20260916_130736" -VersionLabel 20260916_130736
-```
-
-Installer prerequisites warning:
-
-- Setup checks for ODBC Driver 17 for SQL Server and warns if missing.
-- Python packages are bundled in the EXEs; no Python install is needed on target machines.
-
-## Email Send Example
-
-Test-send report pack to one address:
-
-```powershell
-.venv\Scripts\python.exe run_scheduler.py --source sql --report-pack-dir default --send-report-email --email-test-recipient lburkardt@monettmetals.com --no-pause
-```
-
-Outlook desktop send example:
-
-```powershell
-.venv\Scripts\python.exe run_scheduler.py --source sql --report-pack-dir default --send-report-email --email-test-recipient lburkardt@monettmetals.com --email-transport outlook --no-pause
-```
-
-## Maintainer Notes
-
-- Keep scheduler behavior deterministic and easy to trace in logs.
-- Prefer removing stale branch comments over preserving historical architecture notes.
-- Keep tests aligned to current runtime behavior, especially around SQL normalization and OOR writes.
-- Treat hidden mutable global state as a maintenance risk; prefer per-run state.
+- If Open Order Report.xlsx is open/locked, SQL sync can fail when exporting or copying workbook artifacts. Close the workbook and rerun.
+- If Outlook transport is selected, Outlook desktop and pywin32 are required.
+- If SMTP transport is selected, required FMES_SMTP_* variables must be present.
