@@ -1,25 +1,16 @@
-"""
-Application-wide configuration constants.
-
-All shared file locations resolve from a single Schedule root so the program
-is not tied to one user profile. Override with FMES_SCHEDULE_ROOT if needed.
-"""
+"""Application-wide configuration constants for shared schedule files."""
 
 import os
 from pathlib import Path
 
 
 def _resolve_schedule_root():
-    """Return the shared Schedule folder root for this machine."""
+    """Return the shared FMES folder root for this machine."""
     env_root = os.getenv("FMES_SCHEDULE_ROOT", "").strip()
     if env_root:
         return Path(env_root)
 
-    onedrive_root = (os.getenv("OneDriveCommercial") or os.getenv("OneDrive") or "").strip()
-    if onedrive_root:
-        return Path(onedrive_root) / "Quality" / "Schedule"
-
-    return Path.home() / "OneDrive - MonettMetalsUS1" / "Quality" / "Schedule"
+    return Path("S:/FMES")
 
 
 def _resolve_shipping_table_workbook():
@@ -28,27 +19,28 @@ def _resolve_shipping_table_workbook():
     if env_path:
         return Path(env_path)
 
-    return SCHEDULE_ROOT / "Shipping Table.xlsx"
+    return INPUT_DIR / "Shipping Table.xlsx"
 
 
 SCHEDULE_ROOT = _resolve_schedule_root()
+INPUT_DIR = SCHEDULE_ROOT / "Input_Files"
+OUTPUT_DIR = SCHEDULE_ROOT / "Output_Files"
 
 
 class Paths:
-    """Shared file locations derived from SCHEDULE_ROOT."""
-    OPEN_ORDER_REPORT = SCHEDULE_ROOT / "Open Order Report.xlsx"
+    """Shared file locations derived from the FMES input and output folders."""
+    OPEN_ORDER_REPORT = INPUT_DIR / "Open Order Report.xlsx"
     SHIPPING_TABLE_WORKBOOK = _resolve_shipping_table_workbook()
-    BACKUP_DIR = SCHEDULE_ROOT / "Backups"
-    HISTORICAL_OOR_DIR = SCHEDULE_ROOT / "Historical OORs"
-    DB_SNAPSHOT_DIR = SCHEDULE_ROOT / "Historical DB Snapshots"
-    ALLOY_COMPATIBILITY_CSV = SCHEDULE_ROOT / "compatibleAlloys" / "alloy_compatibility.csv"
-    MISSING_JOB_ID_LOG_DIR = SCHEDULE_ROOT
-    OUTPUT_DIR = SCHEDULE_ROOT / "Output"
+    BACKUP_DIR = OUTPUT_DIR / "Backups"
+    HISTORICAL_OOR_DIR = OUTPUT_DIR / "Historical OORs"
+    DB_SNAPSHOT_DIR = OUTPUT_DIR / "Historical DB Snapshots"
+    ALLOY_COMPATIBILITY_CSV = INPUT_DIR / "compatibleAlloys" / "alloy_compatibility.csv"
+    MISSING_JOB_ID_LOG_DIR = OUTPUT_DIR
     REPORT_PACK_DIR = OUTPUT_DIR / "Report Pack"
     MOLD_SCHEDULE_OUTPUT = OUTPUT_DIR / "Mold Schedule.xlsx"
     HEAT_SUMMARY_OUTPUT = OUTPUT_DIR / "Heat Summary.xlsx"
     COMBINED_SCHEDULE_OUTPUT = OUTPUT_DIR / "Production Schedule Summary.xlsx"
-    LOG_DIR = SCHEDULE_ROOT / "Logs"
+    LOG_DIR = OUTPUT_DIR / "Logs"
 
 
 class Columns:

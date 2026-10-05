@@ -1,3 +1,4 @@
+# Local runtime config and credentials; keep the checked-in template below.
 .env
 .env.*
 !.env.example

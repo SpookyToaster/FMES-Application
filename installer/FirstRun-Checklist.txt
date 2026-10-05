@@ -4,37 +4,39 @@ FMES Scheduler - First Run Checklist
 Installed files:
 - Scheduler.exe (full run)
 - SchedulerUpdateOnly.exe (OOR update only)
+- FMES_Prerequisite_Setup.exe (ODBC and local config setup)
 - .env.example (template for environment variables)
 
 Required prerequisites:
 1) Microsoft ODBC Driver 17 for SQL Server
-2) Access to the shared schedule root folder (contains Open Order Report.xlsx)
-3) DB credentials configured in environment variables
+2) Access to S:\FMES\Input_Files (with Open Order Report.xlsx) and S:\FMES\Output_Files
+3) Local FMES config file created with database credentials
 
 Recommended prerequisites:
 1) Outlook desktop configured if using Outlook transport
 2) Write access to schedule root subfolders:
-   - Backups
-   - Historical OORs
-   - Historical DB Snapshots
-   - Output
-   - Logs
+   - S:\FMES\Output_Files
 
 Environment setup:
-1) Copy .env.example to your preferred secure location.
-2) Set at minimum:
+1) Run FMES_Prerequisite_Setup.exe.
+2) Install ODBC Driver 17 if the setup app reports that it is missing.
+3) Use Create / Open Local Config. The app creates the config if needed and never overwrites an existing file.
+4) Keep this file on the local computer; do not place credentials in S:\FMES.
+5) Set at minimum:
    - DB_SERVER
    - DB_NAME
    - DB_USER
    - DB_PASSWORD
-3) Optional:
-   - FMES_SCHEDULE_ROOT
+6) Optional:
+   - FMES_SCHEDULE_ROOT (defaults to S:\FMES)
    - FMES_EMAIL_TRANSPORT
    - FMES_SEND_REPORT_EMAIL
 
 Runtime notes:
 - Full runtime defaults to SQL source unless overridden.
-- If FMES_SCHEDULE_ROOT is not set, the app resolves OneDrive-based defaults.
+- Inputs are read from S:\FMES\Input_Files.
+- Outputs, logs, backups, and history are written beneath S:\FMES\Output_Files.
+- The S: drive must be mapped for the Windows account running FMES.
 - Email sends can be disabled by setting FMES_SEND_REPORT_EMAIL=0.
 
 Validation steps:

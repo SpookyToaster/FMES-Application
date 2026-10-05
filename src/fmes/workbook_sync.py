@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 from openpyxl import Workbook, load_workbook
 import pandas as pd
 
+from .config import Paths
 
 XML_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -25,12 +26,16 @@ CALC_CHAIN_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/rel
 NUMERIC_SQL_COLUMN_OFFSETS = {7, 8, 9, 10, 11, 12, 13, 15, 16}
 MOLDS_COMPLETED_COLUMN = "Molds Completed"
 
-OOR_STATUS_FORMULA_TEMPLATE = (
-    "=IF(ISTEXT(VLOOKUP($J{row},"
-    "'https://monettmetalsus1-my.sharepoint.com/personal/lburkardt_monettmetals_com/"
-    "Documents/Quality/Schedule/Output/[Production Schedule Summary.xlsx]Mold Schedule'!"
-    "$C$2:$C$1048576,1,FALSE)),\"YES\",\"NO\")"
-)
+def _oor_status_formula(row):
+    """Build the status formula using the configured combined schedule location."""
+    schedule_path = Paths.COMBINED_SCHEDULE_OUTPUT
+    workbook_reference = (
+        f"'{schedule_path.parent}\\[{schedule_path.name}]Mold Schedule'!"
+    )
+    return (
+        f"=IF(ISTEXT(VLOOKUP($J{row},{workbook_reference}"
+        "$C$2:$C$1048576,1,FALSE)),\"YES\",\"NO\")"
+    )
 
 
 def to_plain_text(value):
@@ -502,7 +507,7 @@ def write_sql_data_to_oor(source_workbook_path, sql_rows, sql_main_export_column
                 hold_value = "NO"
             _set_cell_plain_text(hold_cell, hold_value)
             status_cell = _find_or_create_cell(row_element, row_idx, status_col)
-            _set_cell_formula(status_cell, OOR_STATUS_FORMULA_TEMPLATE.format(row=row_idx))
+            _set_cell_formula(status_cell, _oor_status_formula(row_idx))
             for col_offset, col_name in enumerate(sql_main_export_columns):
                 col_idx = start_col + col_offset
                 cell = _find_or_create_cell(row_element, row_idx, col_idx)

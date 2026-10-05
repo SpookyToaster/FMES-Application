@@ -99,6 +99,17 @@ Mold-day assignment in [src/fmes/mold_console_schedule.py](src/fmes/mold_console
 
 ## Outputs
 
+### Shared folder layout
+
+FMES uses `S:\FMES` by default. The root can be changed with `FMES_SCHEDULE_ROOT`
+in the local `.env` file or process environment.
+
+- Input workbooks and compatibility data are read from `S:\FMES\Input_Files`.
+- Generated workbooks, logs, backups, history, and report packs are written
+  beneath `S:\FMES\Output_Files`.
+
+The shared drive must be mapped and accessible to the Windows account running FMES.
+
 ### Combined workbook
 
 Default path:
@@ -214,7 +225,12 @@ Email:
 - FMES_SMTP_PASSWORD
 - FMES_SMTP_USE_STARTTLS
 
-Reference template: [.env.example](.env.example)
+Copy [.env.example](.env.example) to
+`%LOCALAPPDATA%\FMES Scheduler\.env` for both source runs and installed
+executables (create the directory if needed). This keeps credentials outside
+the OneDrive repository and shared `S:\FMES` folder. Values in this local file
+override inherited Windows account environment variables; the file is not
+tracked by Git.
 
 ## Testing
 
@@ -266,6 +282,19 @@ Default behavior:
 
 - uses newest release_* folder under %LOCALAPPDATA%\SchedulerProgram\PyInstaller
 - outputs FMES_Scheduler_Setup_<label>.exe in that release folder
+
+### Prerequisite setup application
+
+Build a separate click-to-run Windows helper for installing ODBC Driver 17 and
+creating/opening the per-user local config:
+
+```powershell
+.\build_fmes_prerequisite_setup.ps1 -VersionLabel 0.90
+```
+
+The helper is emitted into the matching local `release_<VersionLabel>` folder.
+It can be copied alongside the scheduler executables. It uses WinGet to install
+the Microsoft ODBC driver and does not overwrite an existing local `.env`.
 
 ## Troubleshooting Notes
 

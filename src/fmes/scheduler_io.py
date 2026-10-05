@@ -2,7 +2,7 @@
 File I/O helpers for Foundry Management and Execution System (FMES).
 
 Currently handles reading the Open Order Report Excel workbook that is
-exported from the ERP system and placed in the shared OneDrive folder.
+exported from the ERP system and placed in the shared FMES input folder.
 """
 
 import math

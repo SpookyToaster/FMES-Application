@@ -10,6 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fmes.alloy_compatibility import can_alloy_share_heat_with
+from fmes.config import Paths
 from fmes.scheduler_io import (
     build_mold_input_diagnostics_rows,
     read_file,
@@ -598,11 +599,11 @@ class SchedulerIOTests(unittest.TestCase):
 
             synced_wb = load_workbook(source_path)
             synced_ws = synced_wb["OOR"]
+            schedule_path = Paths.COMBINED_SCHEDULE_OUTPUT
             self.assertEqual(
                 synced_ws.cell(row=2, column=2).value,
-                "=IF(ISTEXT(VLOOKUP($J2,'https://monettmetalsus1-my.sharepoint.com/personal/"
-                "lburkardt_monettmetals_com/Documents/Quality/Schedule/Output/"
-                "[Production Schedule Summary.xlsx]Mold Schedule'!$C$2:$C$1048576,1,FALSE)),"
+                f"=IF(ISTEXT(VLOOKUP($J2,'{schedule_path.parent}\\[{schedule_path.name}]Mold Schedule'!"
+                "$C$2:$C$1048576,1,FALSE)),"
                 '"YES","NO")',
             )
             self.assertEqual(synced_ws.cell(row=2, column=1).value, "NO")
