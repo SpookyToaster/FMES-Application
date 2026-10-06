@@ -151,6 +151,13 @@ During SQL sync, [src/fmes/scheduler_io.py](src/fmes/scheduler_io.py) also write
 
 Email send path is implemented in [src/fmes/report_email.py](src/fmes/report_email.py).
 
+Interactive frozen-app launches show a recipient prompt before scheduling;
+the user selects Continue when ready. Add/remove edits are saved to the separate per-user
+`%LOCALAPPDATA%\FMES Scheduler\settings.json`; they do not modify the credential
+`.env`. A one-run recipient overrides that list. Closing the prompt continues
+with the current saved/default list. `--no-pause` skips the prompt for
+automated runs.
+
 Send decision precedence in full/OOR CLI:
 
 1. explicit --send-report-email
@@ -230,7 +237,9 @@ Copy [.env.example](.env.example) to
 executables (create the directory if needed). This keeps credentials outside
 the OneDrive repository and shared `S:\FMES` folder. Values in this local file
 override inherited Windows account environment variables; the file is not
-tracked by Git.
+tracked by Git. Recipient-list settings are written separately to
+`%LOCALAPPDATA%\FMES Scheduler\settings.json`, so IT can restrict writes to the
+credentials file while allowing the FMES user to update recipient preferences.
 
 ## Testing
 

@@ -238,13 +238,25 @@ def main():
 
     exit_code = 0
     try:
-        send_report_email = resolve_send_report_email(args.send_report_email)
+        prompt_recipient = None
+        if (
+            getattr(sys, "frozen", False)
+            and not args.no_pause
+            and not args.email_test_recipient
+        ):
+            from .email_prompt import prompt_for_email_recipient
+
+            prompt_recipient = prompt_for_email_recipient()
+
+        send_report_email = resolve_send_report_email(args.send_report_email) or bool(
+            prompt_recipient
+        )
 
         report_pack_dir = args.report_pack_dir
         if isinstance(report_pack_dir, str) and report_pack_dir.strip().lower() == "default":
             report_pack_dir = DEFAULT_REPORT_PACK_OUTPUT
 
-        email_test_recipient = args.email_test_recipient
+        email_test_recipient = prompt_recipient or args.email_test_recipient
         if isinstance(email_test_recipient, str):
             email_test_recipient = email_test_recipient.strip() or None
         if not email_test_recipient:

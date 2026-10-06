@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpyxl import Workbook
 import pandas as pd
@@ -86,6 +87,23 @@ class ReportPackTests(unittest.TestCase):
             self.assertNotIn(result["summary_json"], first_audience_attachments)
             self.assertIn(result["report_pack_workbook"], first_audience_attachments)
             self.assertIn(result["open_order_workbook"], first_audience_attachments)
+
+    def test_saved_recipient_override_is_used_for_each_audience(self):
+        from fmes.report_pack import _build_distribution_manifest
+
+        with patch(
+            "fmes.report_pack.load_email_recipients",
+            return_value=["new@example.com", "another@example.com"],
+        ):
+            manifest = _build_distribution_manifest(
+                {"report_pack_workbook": "report.xlsx"},
+                ("production", "shipping"),
+            )
+        for audience in manifest["audiences"]:
+            self.assertEqual(
+                audience["recipients"],
+                ["new@example.com", "another@example.com"],
+            )
 
 
 if __name__ == "__main__":

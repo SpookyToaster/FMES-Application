@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 import pandas as pd
 
 from .config import Paths
+from .local_settings import load_email_recipients
 from .production_visibility import (
     build_attention_jobs_rows,
     build_daily_capacity_rows,
@@ -24,12 +25,6 @@ DEFAULT_AUDIENCES = (
     "production",
     "order_entry",
     "shipping",
-)
-
-DEFAULT_EMAIL_RECIPIENTS = (
-    "sliles@monettmetals.com",
-    "BRaub@monettmetals.com",
-    "lburkardt@monettmetals.com",
 )
 
 TITLE_FILL = PatternFill(fill_type="solid", start_color="1F4E78", end_color="1F4E78")
@@ -180,6 +175,8 @@ def _copy_updated_open_order_workbook(output_dir: Path, source_workbook_path: st
 
 def _build_distribution_manifest(report_paths: dict, audiences: tuple[str, ...]) -> dict:
     """Build audience-to-artifact mapping for future email automation."""
+    email_recipients = load_email_recipients()
+
     base_attachments = [
         report_paths["report_pack_workbook"],
     ]
@@ -191,7 +188,7 @@ def _build_distribution_manifest(report_paths: dict, audiences: tuple[str, ...])
             {
                 "audience": audience,
                 "enabled": True,
-                "recipients": list(DEFAULT_EMAIL_RECIPIENTS),
+                "recipients": email_recipients,
                 "attachments": list(base_attachments),
             }
             for audience in audiences

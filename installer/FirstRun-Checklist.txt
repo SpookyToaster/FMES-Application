@@ -34,6 +34,10 @@ Environment setup:
 
 Runtime notes:
 - Full runtime defaults to SQL source unless overridden.
+- The interactive app shows an email-recipient prompt; select Continue to proceed with the saved/default recipient list.
+- Added/removed recipients are stored in %LOCALAPPDATA%\FMES Scheduler\settings.json, separate from credentials in .env.
+- The FMES user needs permission to write settings.json; credentials in .env can remain separately restricted by IT.
+- The single-recipient option applies only to the current run.
 - Inputs are read from S:\FMES\Input_Files.
 - Outputs, logs, backups, and history are written beneath S:\FMES\Output_Files.
 - The S: drive must be mapped for the Windows account running FMES.
